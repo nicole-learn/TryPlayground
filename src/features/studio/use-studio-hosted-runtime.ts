@@ -2,6 +2,6 @@
 
 import { useStudioMockRuntime } from "./use-studio-mock-runtime";
 
-export function useStudioLocalRuntime() {
-  return useStudioMockRuntime("local");
+export function useStudioHostedRuntime() {
+  return useStudioMockRuntime("hosted");
 }

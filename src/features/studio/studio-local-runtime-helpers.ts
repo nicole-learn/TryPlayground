@@ -1,17 +1,16 @@
 "use client";
 
-import {
-  createStudioId,
-  LOCAL_STUDIO_WORKSPACE_ID,
-} from "./studio-local-runtime-data";
 import { readUploadedAssetMediaMetadata } from "./studio-asset-metadata";
 import type {
   DraftReference,
   LibraryItem,
   StudioFolder,
+  StudioFolderItem,
   StudioReferenceInputKind,
+  StudioRunFile,
   StudioRunStatus,
 } from "./types";
+import { createStudioId } from "./studio-local-runtime-data";
 
 export const STUDIO_MEDIA_UPLOAD_ACCEPT = "image/*,video/*";
 
@@ -31,15 +30,21 @@ function sanitizeFileName(rawValue: string) {
   return rawValue
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/[^a-z0-9.]+/g, "-")
     .replace(/^-+|-+$/g, "");
 }
 
 function getFileExtension(params: {
   kind: LibraryItem["kind"];
   mimeType: string | null;
+  fileName?: string | null;
 }) {
   const normalizedMimeType = params.mimeType?.toLowerCase() ?? "";
+  const normalizedFileName = params.fileName?.toLowerCase() ?? "";
+
+  if (normalizedFileName.includes(".")) {
+    return normalizedFileName.split(".").pop() ?? "bin";
+  }
   if (normalizedMimeType.includes("png")) return "png";
   if (normalizedMimeType.includes("jpeg") || normalizedMimeType.includes("jpg")) {
     return "jpg";
@@ -79,12 +84,12 @@ export function releaseUploadedPreview(
 
 export function createFolderItemCounts(
   folders: StudioFolder[],
-  items: LibraryItem[]
+  folderItems: StudioFolderItem[]
 ) {
   return Object.fromEntries(
     folders.map((folder) => [
       folder.id,
-      items.filter((item) => item.folderId === folder.id).length,
+      folderItems.filter((entry) => entry.folderId === folder.id).length,
     ])
   ) as Record<string, number>;
 }
@@ -220,8 +225,7 @@ export function createDraftReferenceFromLibraryItem(params: {
   file: File;
   item: LibraryItem;
 }): DraftReference {
-  const kind =
-    params.item.kind === "text" ? "document" : params.item.kind;
+  const kind = params.item.kind === "text" ? "document" : params.item.kind;
   const previewUrl = params.item.thumbnailUrl ?? params.item.previewUrl;
 
   return {
@@ -252,6 +256,7 @@ export async function resolveLibraryItemToReferenceFile(
   const extension = getFileExtension({
     kind: item.kind,
     mimeType: item.mimeType,
+    fileName: item.fileName,
   });
   const fileName = `${baseFileName}.${extension}`;
 
@@ -297,6 +302,8 @@ export async function resolveLibraryItemToReferenceFile(
 }
 
 export function createTextLibraryItem(params: {
+  userId: string;
+  workspaceId: string;
   title: string;
   body: string;
   folderId: string | null;
@@ -304,10 +311,15 @@ export function createTextLibraryItem(params: {
   const trimmedBody = params.body.trim();
   const fallbackTitle = trimmedBody.slice(0, 36) || "Text note";
   const timestamp = new Date().toISOString();
+  const folderIds = params.folderId ? [params.folderId] : [];
+  const fileName = `${sanitizeFileName(params.title || fallbackTitle) || "text-note"}.txt`;
 
   return {
     id: createStudioId("asset"),
-    workspaceId: LOCAL_STUDIO_WORKSPACE_ID,
+    userId: params.userId,
+    workspaceId: params.workspaceId,
+    runFileId: null,
+    sourceRunId: null,
     title: params.title.trim() || fallbackTitle,
     kind: "text",
     source: "uploaded",
@@ -327,18 +339,25 @@ export function createTextLibraryItem(params: {
     mediaHeight: null,
     aspectRatioLabel: null,
     folderId: params.folderId,
+    folderIds,
+    storageBucket: "inline-text",
     storagePath: null,
+    thumbnailPath: null,
+    fileName,
     mimeType: "text/plain",
     byteSize: trimmedBody.length,
+    metadata: {},
     errorMessage: null,
   };
 }
 
-export async function createUploadedLibraryItem(
-  file: File,
-  folderId: string | null
-): Promise<LibraryItem | null> {
-  const fileType = file.type.toLowerCase();
+export async function createUploadedRunFileAndLibraryItem(params: {
+  file: File;
+  userId: string;
+  workspaceId: string;
+  folderId: string | null;
+}): Promise<{ runFile: StudioRunFile; item: LibraryItem } | null> {
+  const fileType = params.file.type.toLowerCase();
   const kind = fileType.startsWith("image/")
     ? "image"
     : fileType.startsWith("video/")
@@ -349,17 +368,41 @@ export async function createUploadedLibraryItem(
     return null;
   }
 
-  const previewUrl = URL.createObjectURL(file);
+  const previewUrl = URL.createObjectURL(params.file);
   const mediaMetadata = await readUploadedAssetMediaMetadata({
     kind,
     previewUrl,
   });
   const timestamp = new Date().toISOString();
+  const runFileId = createStudioId("run-file");
+  const storagePath = `uploads/${runFileId}/${sanitizeFileName(params.file.name) || "upload.bin"}`;
+  const folderIds = params.folderId ? [params.folderId] : [];
 
-  return {
+  const runFile: StudioRunFile = {
+    id: runFileId,
+    runId: null,
+    userId: params.userId,
+    fileRole: "input",
+    sourceType: "uploaded",
+    storageBucket: "browser-upload",
+    storagePath,
+    mimeType: params.file.type || null,
+    fileName: params.file.name,
+    fileSizeBytes: params.file.size,
+    mediaWidth: mediaMetadata.mediaWidth,
+    mediaHeight: mediaMetadata.mediaHeight,
+    aspectRatioLabel: mediaMetadata.aspectRatioLabel,
+    metadata: {},
+    createdAt: timestamp,
+  };
+
+  const item: LibraryItem = {
     id: createStudioId("asset"),
-    workspaceId: LOCAL_STUDIO_WORKSPACE_ID,
-    title: file.name,
+    userId: params.userId,
+    workspaceId: params.workspaceId,
+    runFileId,
+    sourceRunId: null,
+    title: params.file.name,
     kind,
     source: "uploaded",
     role: "uploaded_source",
@@ -373,16 +416,23 @@ export async function createUploadedLibraryItem(
     provider: "fal",
     status: "ready",
     prompt: "",
-    meta: `${file.type || "File"} • ${(file.size / 1024 / 1024).toFixed(1)} MB`,
+    meta: `${params.file.type || "File"} • ${(params.file.size / 1024 / 1024).toFixed(1)} MB`,
     mediaWidth: mediaMetadata.mediaWidth,
     mediaHeight: mediaMetadata.mediaHeight,
     aspectRatioLabel: mediaMetadata.aspectRatioLabel,
-    folderId,
-    storagePath: null,
-    mimeType: file.type || null,
-    byteSize: file.size,
+    folderId: params.folderId,
+    folderIds,
+    storageBucket: "browser-upload",
+    storagePath,
+    thumbnailPath: storagePath,
+    fileName: params.file.name,
+    mimeType: params.file.type || null,
+    byteSize: params.file.size,
+    metadata: {},
     errorMessage: null,
   };
+
+  return { runFile, item };
 }
 
 export function hasFolderNameConflict(

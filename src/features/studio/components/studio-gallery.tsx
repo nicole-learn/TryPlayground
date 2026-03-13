@@ -10,6 +10,7 @@ import {
   Square,
   Slash,
   Trash2,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import type { MouseEvent, RefObject } from "react";
@@ -51,6 +52,7 @@ interface StudioGalleryProps {
   }) => void;
   onMoveDraggedItems?: (itemIds: string[]) => void;
   onOpenItem: (itemId: string) => void;
+  onCancelRun?: (runId: string) => void;
   onReuseItem: (itemId: string) => void;
   onToggleItemSelection: (itemId: string) => void;
 }
@@ -269,6 +271,7 @@ function AssetTile({
   onDeleteItem,
   onDragEndItem,
   onDragStartItem,
+  onCancelRun,
   onReuseItem,
   onOpenItem,
   onToggleItemSelection,
@@ -287,6 +290,7 @@ function AssetTile({
     x: number;
     y: number;
   }) => void;
+  onCancelRun?: (runId: string) => void;
   onOpenItem: (itemId: string) => void;
   onReuseItem: (itemId: string) => void;
   onToggleItemSelection: (itemId: string) => void;
@@ -299,6 +303,7 @@ function AssetTile({
   if (displayItem.type === "run") {
     const statusVisual = getRunStatusVisual(displayItem.run.status);
     const statusDescription = getRunStatusDescription(displayItem.run);
+    const canCancelRun = displayItem.run.status === "queued" || displayItem.run.status === "pending";
 
     return (
       <div
@@ -324,6 +329,24 @@ function AssetTile({
               {displayItem.run.kind}
             </span>
           </div>
+
+          {canCancelRun && onCancelRun ? (
+            <div className="absolute right-3 top-3 z-20">
+              <button
+                type="button"
+                onMouseDown={handleOverlayButtonMouseDown}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onCancelRun(displayItem.run.id);
+                }}
+                className="inline-flex size-8 items-center justify-center rounded-md border border-white/18 bg-black/35 text-white backdrop-blur-sm transition hover:bg-black/50"
+                aria-label={`Cancel ${displayItem.run.prompt}`}
+                title="Cancel queued generation"
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          ) : null}
 
           <div className="mt-auto max-w-[24rem]">
             <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-white/62">
@@ -563,6 +586,7 @@ export function StudioGallery({
   onItemDragStart,
   onMoveDraggedItems,
   onOpenItem,
+  onCancelRun,
   onReuseItem,
   onToggleItemSelection,
 }: StudioGalleryProps) {
@@ -697,6 +721,7 @@ export function StudioGallery({
                         onDeleteItem={onDeleteItem}
                         onDragEndItem={onItemDragEnd}
                         onDragStartItem={onItemDragStart}
+                        onCancelRun={onCancelRun}
                         onOpenItem={onOpenItem}
                         onReuseItem={onReuseItem}
                         onToggleItemSelection={onToggleItemSelection}

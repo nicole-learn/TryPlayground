@@ -3,13 +3,18 @@
 import { Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
 import { ModalShell } from "./modal-shell";
-import type { StudioProviderSettings } from "../types";
+import type {
+  StudioProviderSaveResult,
+  StudioProviderSettings,
+} from "../types";
 
 interface ProviderSettingsDialogProps {
   open: boolean;
   initialValues: StudioProviderSettings;
   onClose: () => void;
-  onSave: (settings: StudioProviderSettings) => void;
+  onSave: (
+    settings: StudioProviderSettings
+  ) => Promise<StudioProviderSaveResult> | StudioProviderSaveResult;
 }
 
 function ProviderSettingsForm({
@@ -17,29 +22,50 @@ function ProviderSettingsForm({
   onSave,
   onClose,
 }: Omit<ProviderSettingsDialogProps, "open">) {
+  const [falApiKey, setFalApiKey] = useState(initialValues.falApiKey);
   const [revealKey, setRevealKey] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   return (
     <form
       className="space-y-5"
-      onSubmit={(event) => {
+      onSubmit={async (event) => {
         event.preventDefault();
-        const formData = new FormData(event.currentTarget);
-        onSave({
-          falApiKey: String(formData.get("falApiKey") ?? ""),
+        setSaving(true);
+        setErrorMessage(null);
+        setSuccessMessage(null);
+
+        const result = await onSave({
+          falApiKey,
+          lastValidatedAt: initialValues.lastValidatedAt,
         });
+
+        if (!result.ok) {
+          setSaving(false);
+          setErrorMessage(result.errorMessage ?? "Could not save your Fal API key.");
+          return;
+        }
+
+        setSaving(false);
+        setSuccessMessage("Fal API key connected for this browser session.");
       }}
     >
       <label className="block">
         <span className="mb-2 block text-sm font-medium text-white">
           Fal API key
         </span>
-        <div className="flex items-center overflow-hidden rounded-2xl border border-white/10 bg-black/20 transition focus-within:border-cyan-400/60">
+        <div className="flex items-center overflow-hidden rounded-2xl border border-white/10 bg-black/20 transition focus-within:border-primary/55">
           <input
-            key={initialValues.falApiKey}
             name="falApiKey"
             type={revealKey ? "text" : "password"}
-            defaultValue={initialValues.falApiKey}
+            value={falApiKey}
+            onChange={(event) => {
+              setFalApiKey(event.target.value);
+              setErrorMessage(null);
+              setSuccessMessage(null);
+            }}
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="off"
@@ -69,19 +95,33 @@ function ProviderSettingsForm({
         Nicole
       </div>
 
+      {errorMessage ? (
+        <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-100/90">
+          {errorMessage}
+        </div>
+      ) : null}
+
+      {successMessage ? (
+        <div className="rounded-2xl border border-primary/20 bg-primary/10 px-4 py-3 text-sm text-primary-foreground">
+          {successMessage}
+        </div>
+      ) : null}
+
       <div className="flex items-center justify-end gap-3">
         <button
           type="button"
           onClick={onClose}
-          className="rounded-full border border-white/10 px-4 py-2 text-sm text-white/70 transition hover:border-white/20 hover:text-white"
+          disabled={saving}
+          className="rounded-full border border-white/10 px-4 py-2 text-sm text-white/70 transition hover:border-white/20 hover:text-white disabled:opacity-50"
         >
           Cancel
         </button>
         <button
           type="submit"
-          className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:brightness-110"
+          disabled={saving}
+          className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:brightness-110 disabled:opacity-50"
         >
-          Save Settings
+          {saving ? "Saving..." : "Save Settings"}
         </button>
       </div>
     </form>

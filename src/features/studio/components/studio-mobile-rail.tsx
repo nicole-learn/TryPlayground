@@ -1,6 +1,13 @@
 "use client";
 
-import { FileText, FolderPlus, SquareMousePointer, Trash2, Upload } from "lucide-react";
+import {
+  Download,
+  FileText,
+  FolderPlus,
+  SquareMousePointer,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/cn";
@@ -10,9 +17,12 @@ import { StudioAccountButton } from "./studio-account-button";
 
 interface StudioMobileRailProps {
   appMode: StudioAppMode;
+  accountLabel?: string;
   folderCounts: Record<string, number>;
   folders: StudioFolder[];
   hasFalKey: boolean;
+  onClearSelection: () => void;
+  onDownloadSelected: () => void;
   onDeleteSelected: () => void;
   selectedFolderId: string | null;
   selectedItemCount: number;
@@ -58,9 +68,12 @@ function RailButton({
 
 export function StudioMobileRail({
   appMode,
+  accountLabel,
   folderCounts,
   folders,
   hasFalKey,
+  onClearSelection,
+  onDownloadSelected,
   onDeleteSelected,
   selectedFolderId,
   selectedItemCount,
@@ -80,6 +93,7 @@ export function StudioMobileRail({
         <StudioAccountButton
           appMode={appMode}
           hasFalKey={hasFalKey}
+          hostedLabel={accountLabel}
           onClick={onOpenAccount}
         />
       </div>
@@ -132,15 +146,37 @@ export function StudioMobileRail({
         </div>
 
         {selectedItemCount > 0 ? (
-          <button
-            type="button"
-            onClick={onDeleteSelected}
-            aria-label="Delete selected"
-            title={`Delete ${selectedItemCount}`}
-            className="flex size-[46px] shrink-0 items-center justify-center rounded-md bg-red-500/16 text-red-200 transition-all duration-150 hover:bg-red-500/24 active:scale-[0.95]"
-          >
-            <Trash2 className="size-5" />
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={onClearSelection}
+              aria-label="Clear selected"
+              title={`Clear ${selectedItemCount} selected`}
+              className="flex size-[46px] shrink-0 items-center justify-center rounded-md bg-white/[0.05] text-white/72 transition-all duration-150 hover:bg-white/[0.08] active:scale-[0.95]"
+            >
+              <span className="text-xs font-semibold">{selectedItemCount}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onDownloadSelected}
+              aria-label="Download selected"
+              title={`Download ${selectedItemCount}`}
+              className="flex size-[46px] shrink-0 items-center justify-center rounded-md bg-primary/18 text-primary transition-all duration-150 hover:bg-primary/24 active:scale-[0.95]"
+            >
+              <Download className="size-5" />
+            </button>
+
+            <button
+              type="button"
+              onClick={onDeleteSelected}
+              aria-label="Delete selected"
+              title={`Delete ${selectedItemCount}`}
+              className="flex size-[46px] shrink-0 items-center justify-center rounded-md bg-red-500/16 text-red-200 transition-all duration-150 hover:bg-red-500/24 active:scale-[0.95]"
+            >
+              <Trash2 className="size-5" />
+            </button>
+          </>
         ) : null}
 
         <RailButton

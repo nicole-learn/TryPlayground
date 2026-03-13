@@ -9,6 +9,7 @@ import { FolderDialog } from "./folder-dialog";
 import { FolderSidebar } from "./folder-sidebar";
 import { HostedAccountDialog } from "./hosted-account-dialog";
 import { ProviderSettingsDialog } from "./provider-settings-dialog";
+import { QueueLimitDialog } from "./queue-limit-dialog";
 import { StudioDevModeOverlay } from "./studio-dev-mode-overlay";
 import { StudioDragPreviewOverlay } from "./studio-drag-preview-overlay";
 import { StudioGallery } from "./studio-gallery";
@@ -169,7 +170,7 @@ export function StudioPage({
   };
 
   const downloadFolder = (folderId: string) => {
-    const folderItems = studio.items.filter((item) => item.folderId === folderId);
+    const folderItems = studio.getItemsForFolder(folderId);
     downloadFolderItems(folderItems);
   };
 
@@ -235,6 +236,7 @@ export function StudioPage({
       onItemDragStart={handleItemDragStart}
       onMoveDraggedItems={(itemIds) => studio.moveItemsToFolder(itemIds, null)}
       onOpenItem={setActiveItemId}
+      onCancelRun={studio.cancelRun}
       onReuseItem={studio.reuseItem}
       onToggleItemSelection={studio.toggleItemSelection}
     />
@@ -265,6 +267,7 @@ export function StudioPage({
         studio.moveItemsToFolder(itemIds, studio.selectedFolderId)
       }
       onOpenItem={setActiveItemId}
+      onCancelRun={studio.cancelRun}
       onReuseItem={studio.reuseItem}
       onToggleItemSelection={studio.toggleItemSelection}
     />
@@ -299,9 +302,12 @@ export function StudioPage({
         mobileRail={
           <StudioMobileRail
             appMode={appMode}
+            accountLabel={studio.accountButtonLabel}
             folderCounts={studio.folderCounts}
             folders={studio.folders}
             hasFalKey={studio.hasFalKey}
+            onClearSelection={studio.clearSelection}
+            onDownloadSelected={downloadSelectedItems}
             onDeleteSelected={studio.deleteSelectedItems}
             selectedFolderId={studio.selectedFolderId}
             selectedItemCount={studio.selectedItemCount}
@@ -336,6 +342,7 @@ export function StudioPage({
         topBar={
           <StudioTopBar
             appMode={appMode}
+            accountLabel={studio.accountButtonLabel}
             hasFalKey={studio.hasFalKey}
             onClearSelection={studio.clearSelection}
             onDeleteSelected={studio.deleteSelectedItems}
@@ -370,8 +377,11 @@ export function StudioPage({
       ) : null}
 
       <HostedAccountDialog
+        account={studio.hostedAccount}
         open={appMode === "hosted" && hostedAccountOpen}
+        purchasePending={studio.purchaseCreditsPending}
         onClose={() => setHostedAccountOpen(false)}
+        onPurchaseCredits={studio.purchaseHostedCredits}
       />
 
       <FolderDialog
@@ -419,7 +429,7 @@ export function StudioPage({
         selectedFolderId={studio.uploadDialogFolderId}
         onChooseFiles={(files) => studio.uploadFiles(files, studio.uploadDialogFolderId)}
         onClose={studio.closeUploadDialog}
-        onToggleFolder={studio.toggleUploadDialogFolder}
+        onSelectFolder={studio.setUploadDialogFolder}
       />
 
       <AssetDetailDialog
@@ -437,6 +447,11 @@ export function StudioPage({
           setActiveItemId(null);
         }}
         onSaveText={studio.updateTextItem}
+      />
+
+      <QueueLimitDialog
+        open={studio.queueLimitDialogOpen}
+        onClose={studio.closeQueueLimitDialog}
       />
     </>
   );

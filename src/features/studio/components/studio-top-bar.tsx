@@ -9,6 +9,7 @@ import { StudioAccountButton } from "./studio-account-button";
 
 interface StudioTopBarProps {
   appMode: StudioAppMode;
+  accountLabel?: string;
   hasFalKey: boolean;
   onClearSelection: () => void;
   onDeleteSelected: () => void;
@@ -57,6 +58,7 @@ function ActionPillButton({
 
 export function StudioTopBar({
   appMode,
+  accountLabel,
   hasFalKey,
   onClearSelection,
   onDeleteSelected,
@@ -165,6 +167,7 @@ export function StudioTopBar({
         <StudioAccountButton
           appMode={appMode}
           hasFalKey={hasFalKey}
+          hostedLabel={accountLabel}
           onClick={onOpenAccount}
         />
       </div>

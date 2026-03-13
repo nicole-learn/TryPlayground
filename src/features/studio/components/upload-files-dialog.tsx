@@ -1,5 +1,6 @@
 "use client";
 
+import { Check } from "lucide-react";
 import { useRef } from "react";
 import type { StudioFolder } from "../types";
 import { STUDIO_MEDIA_UPLOAD_ACCEPT } from "../studio-local-runtime-helpers";
@@ -11,7 +12,7 @@ interface UploadFilesDialogProps {
   selectedFolderId: string | null;
   onChooseFiles: (files: File[]) => void | Promise<void>;
   onClose: () => void;
-  onToggleFolder: (folderId: string) => void;
+  onSelectFolder: (folderId: string | null) => void;
 }
 
 export function UploadFilesDialog({
@@ -21,7 +22,7 @@ export function UploadFilesDialog({
   selectedFolderId,
   onChooseFiles,
   onClose,
-  onToggleFolder,
+  onSelectFolder,
 }: UploadFilesDialogProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -73,26 +74,35 @@ export function UploadFilesDialog({
         {folders.length > 0 ? (
           <div className="border-t border-white/10 px-5 py-3">
             <p className="mb-2.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
-              Add to folders
+              Add to folder
             </p>
             <div className="stable-scrollbar flex max-h-48 flex-col gap-1 overflow-y-auto">
+              <button
+                type="button"
+                onClick={() => onSelectFolder(null)}
+                disabled={loading}
+                className="flex items-center justify-between rounded-lg px-2 py-1.5 text-left text-sm text-foreground/80 transition hover:bg-white/[0.04]"
+              >
+                <span>No folder</span>
+                {selectedFolderId === null ? (
+                  <Check className="size-4 text-primary" />
+                ) : null}
+              </button>
+
               {folders.map((folder) => {
-                const isChecked = selectedFolderId === folder.id;
+                const isSelected = selectedFolderId === folder.id;
 
                 return (
-                  <label
+                  <button
                     key={folder.id}
-                    className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm text-foreground/80"
+                    type="button"
+                    onClick={() => onSelectFolder(folder.id)}
+                    disabled={loading}
+                    className="flex items-center justify-between rounded-lg px-2 py-1.5 text-left text-sm text-foreground/80 transition hover:bg-white/[0.04]"
                   >
-                    <input
-                      type="checkbox"
-                      checked={isChecked}
-                      onChange={() => onToggleFolder(folder.id)}
-                      disabled={loading}
-                      className="size-3.5 rounded border-border/60 accent-primary"
-                    />
                     <span className="truncate">{folder.name}</span>
-                  </label>
+                    {isSelected ? <Check className="size-4 text-primary" /> : null}
+                  </button>
                 );
               })}
             </div>
