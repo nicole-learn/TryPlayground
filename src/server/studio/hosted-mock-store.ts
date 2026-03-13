@@ -7,6 +7,15 @@ import {
   createStudioSeedSnapshot,
   hydrateDraft,
 } from "@/features/studio/studio-local-runtime-data";
+import {
+  getHostedStudioConcurrencyLimit,
+  getStudioRunCompletionDelayMs,
+  quoteStudioDraftCredits,
+  shouldStudioMockRunFail,
+} from "@/features/studio/studio-generation-rules";
+import {
+  reorderStudioFoldersByIds,
+} from "@/features/studio/studio-folder-order";
 import { getStudioModelById } from "@/features/studio/studio-model-catalog";
 import type { HostedStudioMutation } from "@/features/studio/studio-hosted-mock-api";
 import type {
@@ -32,79 +41,6 @@ type HostedMockStore = {
 };
 
 const STORE_KEY = "__VYDELABS_HOSTED_MOCK_STORE__";
-
-function sortFoldersByOrder(folders: StudioFolder[]) {
-  return [...folders].sort((left, right) => {
-    if (left.sortOrder !== right.sortOrder) {
-      return left.sortOrder - right.sortOrder;
-    }
-
-    if (left.createdAt !== right.createdAt) {
-      return left.createdAt.localeCompare(right.createdAt);
-    }
-
-    return left.id.localeCompare(right.id);
-  });
-}
-
-function reorderFolders(
-  folders: StudioFolder[],
-  orderedFolderIds: string[],
-  updatedAt: string
-) {
-  const folderMap = new Map(folders.map((folder) => [folder.id, folder]));
-  const nextFolders = orderedFolderIds
-    .map((folderId) => folderMap.get(folderId))
-    .filter((folder): folder is StudioFolder => Boolean(folder));
-  const includedIds = new Set(nextFolders.map((folder) => folder.id));
-  const remainingFolders = sortFoldersByOrder(folders).filter(
-    (folder) => !includedIds.has(folder.id)
-  );
-
-  return [...nextFolders, ...remainingFolders].map((folder, index) => ({
-    ...folder,
-    sortOrder: index,
-    updatedAt: folder.sortOrder === index ? folder.updatedAt : updatedAt,
-  }));
-}
-
-function quoteCredits(modelId: string, draft: PersistedStudioDraft) {
-  if (modelId === "veo-3.1") {
-    const durationMultiplier = Math.max(1, Math.round(draft.durationSeconds / 4));
-    const resolutionBase =
-      draft.resolution === "4K" ? 24 : draft.resolution === "1080p" ? 16 : 12;
-    return resolutionBase + Math.max(0, durationMultiplier - 1) * 4;
-  }
-
-  if (modelId === "nano-banana-2") {
-    if (draft.resolution === "4K") return 10;
-    if (draft.resolution === "2K") return 7;
-    return 4;
-  }
-
-  return 1;
-}
-
-function getConcurrencyLimit(snapshot: StudioWorkspaceSnapshot) {
-  const activeUsers = Math.max(snapshot.queueSettings.activeHostedUserCount, 1);
-  return Math.max(1, Math.floor(snapshot.queueSettings.providerSlotLimit / activeUsers));
-}
-
-function getCompletionDelayMs(run: GenerationRun) {
-  if (run.kind === "video") {
-    return 3200;
-  }
-
-  if (run.kind === "text") {
-    return 1200;
-  }
-
-  return 1800;
-}
-
-function shouldMockRunFail(run: GenerationRun) {
-  return /\b(fail|error)\b/i.test(run.prompt);
-}
 
 function cloneSnapshot(snapshot: StudioWorkspaceSnapshot) {
   return structuredClone(snapshot);
@@ -162,7 +98,10 @@ function scheduleDispatch(store: HostedMockStore, runId: string, delayMs = 320) 
       (entry) => entry.status === "processing"
     ).length;
 
-    if (processingCount >= getConcurrencyLimit(store.snapshot)) {
+    if (
+      processingCount >=
+      getHostedStudioConcurrencyLimit(store.snapshot.queueSettings)
+    ) {
       scheduleDispatch(store, runId, 450);
       return;
     }
@@ -200,7 +139,7 @@ function scheduleCompletion(store: HostedMockStore, runId: string) {
 
     const finishedAt = new Date().toISOString();
 
-    if (shouldMockRunFail(latestRun)) {
+    if (shouldStudioMockRunFail(latestRun)) {
       latestRun.status = "failed";
       latestRun.providerStatus = "failed";
       latestRun.completedAt = finishedAt;
@@ -270,7 +209,7 @@ function scheduleCompletion(store: HostedMockStore, runId: string) {
     }
     syncFolderMemberships(store.snapshot);
     syncHostedQueue(store);
-  }, getCompletionDelayMs(run));
+  }, getStudioRunCompletionDelayMs(run));
 
   store.completionTimers.set(runId, timer);
 }
@@ -356,7 +295,7 @@ export async function mutateHostedMockSnapshot(mutation: HostedStudioMutation) {
       break;
     }
     case "reorder_folders": {
-      snapshot.folders = reorderFolders(
+      snapshot.folders = reorderStudioFoldersByIds(
         snapshot.folders,
         mutation.orderedFolderIds,
         new Date().toISOString()
@@ -494,7 +433,7 @@ export async function mutateHostedMockSnapshot(mutation: HostedStudioMutation) {
         ...createDraft(model),
         ...mutation.draft,
       };
-      const estimatedCredits = quoteCredits(model.id, persistedDraft);
+      const estimatedCredits = quoteStudioDraftCredits(model.id, persistedDraft);
       if (
         snapshot.creditBalance &&
         snapshot.creditBalance.balanceCredits < estimatedCredits

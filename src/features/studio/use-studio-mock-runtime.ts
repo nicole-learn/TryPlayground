@@ -6,11 +6,17 @@ import {
   deleteUploadedAssetFile,
   loadStoredProviderSettings,
   loadStoredWorkspaceSnapshot,
-  loadUploadedAssetFile,
   saveStoredProviderSettings,
   saveStoredWorkspaceSnapshot,
   saveUploadedAssetFile,
 } from "./studio-browser-storage";
+import {
+  getStudioConcurrencyLimitForMode,
+  getStudioRunCompletionDelayMs,
+  quoteStudioDraftCredits,
+  shouldStudioMockRunFail,
+} from "./studio-generation-rules";
+import { reorderStudioFoldersByIds, sortStudioFoldersByOrder } from "./studio-folder-order";
 import {
   buildStudioDraftMap,
   createDraft,
@@ -43,6 +49,10 @@ import {
   revokePreviewUrl,
 } from "./studio-local-runtime-helpers";
 import {
+  buildStudioWorkspaceSnapshot,
+  hydrateUploadedPreviewUrlsForItems,
+} from "./studio-runtime-snapshot";
+import {
   STUDIO_MODEL_CATALOG,
   STUDIO_MODEL_SECTIONS,
   getStudioModelById,
@@ -56,17 +66,13 @@ import type {
   GenerationRun,
   LibraryItem,
   PersistedStudioDraft,
-  StudioCreditBalance,
-  StudioCreditPack,
   StudioDraft,
   StudioFolder,
   StudioFolderEditorMode,
-  StudioFolderItem,
   StudioHostedAccount,
   StudioProviderConnectionStatus,
   StudioProviderSaveResult,
   StudioProviderSettings,
-  StudioQueueSettings,
   StudioRunFile,
   StudioWorkspaceSnapshot,
 } from "./types";
@@ -84,161 +90,6 @@ function createEmptyDraftReferenceMap() {
   return Object.fromEntries(
     STUDIO_MODEL_CATALOG.map((model) => [model.id, [] as DraftReference[]])
   ) as Record<string, DraftReference[]>;
-}
-
-function sortFoldersByOrder(folders: StudioFolder[]) {
-  return [...folders].sort((left, right) => {
-    if (left.sortOrder !== right.sortOrder) {
-      return left.sortOrder - right.sortOrder;
-    }
-
-    if (left.createdAt !== right.createdAt) {
-      return left.createdAt.localeCompare(right.createdAt);
-    }
-
-    return left.id.localeCompare(right.id);
-  });
-}
-
-function reorderStudioFolders(
-  folders: StudioFolder[],
-  orderedFolderIds: string[],
-  updatedAt: string
-) {
-  const folderMap = new Map(folders.map((folder) => [folder.id, folder]));
-  const nextFolders = orderedFolderIds
-    .map((folderId) => folderMap.get(folderId))
-    .filter((folder): folder is StudioFolder => Boolean(folder));
-  const includedIds = new Set(nextFolders.map((folder) => folder.id));
-  const remainingFolders = sortFoldersByOrder(folders).filter(
-    (folder) => !includedIds.has(folder.id)
-  );
-
-  return [...nextFolders, ...remainingFolders].map((folder, index) => ({
-    ...folder,
-    sortOrder: index,
-    updatedAt: folder.sortOrder === index ? folder.updatedAt : updatedAt,
-  }));
-}
-
-function quoteCredits(modelId: string, draft: StudioDraft) {
-  if (modelId === "veo-3.1") {
-    const durationMultiplier = Math.max(1, Math.round(draft.durationSeconds / 4));
-    const resolutionBase =
-      draft.resolution === "4K" ? 24 : draft.resolution === "1080p" ? 16 : 12;
-    return resolutionBase + Math.max(0, durationMultiplier - 1) * 4;
-  }
-
-  if (modelId === "nano-banana-2") {
-    if (draft.resolution === "4K") return 10;
-    if (draft.resolution === "2K") return 7;
-    return 4;
-  }
-
-  return 1;
-}
-
-function getConcurrencyLimit(mode: StudioAppMode, queueSettings: StudioQueueSettings) {
-  if (mode === "hosted") {
-    const activeUsers = Math.max(queueSettings.activeHostedUserCount, 1);
-    return Math.max(1, Math.floor(queueSettings.providerSlotLimit / activeUsers));
-  }
-
-  return queueSettings.localConcurrencyLimit;
-}
-
-function getCompletionDelayMs(run: GenerationRun) {
-  if (run.kind === "video") {
-    return 3200;
-  }
-
-  if (run.kind === "text") {
-    return 1200;
-  }
-
-  return 1800;
-}
-
-function shouldMockRunFail(run: GenerationRun) {
-  return /\b(fail|error)\b/i.test(run.prompt);
-}
-
-function sanitizeItemsForStorage(items: LibraryItem[]) {
-  return items.map((item) => {
-    if (item.storageBucket !== "browser-upload") {
-      return item;
-    }
-
-    return {
-      ...item,
-      previewUrl: null,
-      thumbnailUrl: null,
-    };
-  });
-}
-
-async function hydrateUploadedPreviewUrls(
-  items: LibraryItem[],
-  previewUrls: Map<string, string>
-) {
-  const hydratedItems = await Promise.all(
-    items.map(async (item) => {
-      if (item.storageBucket !== "browser-upload" || !item.storagePath) {
-        return item;
-      }
-
-      const blob = await loadUploadedAssetFile(item.storagePath);
-      if (!blob) {
-        return item;
-      }
-
-      const previewUrl = URL.createObjectURL(blob);
-      previewUrls.set(item.id, previewUrl);
-
-      return {
-        ...item,
-        previewUrl,
-        thumbnailUrl: previewUrl,
-      };
-    })
-  );
-
-  return hydratedItems;
-}
-
-function buildWorkspaceSnapshot(params: {
-  activeCreditPack: StudioCreditPack | null;
-  appMode: StudioAppMode;
-  creditBalance: StudioCreditBalance | null;
-  draftsByModelId: Record<string, PersistedStudioDraft>;
-  folders: StudioFolder[];
-  folderItems: StudioFolderItem[];
-  gallerySizeLevel: number;
-  items: LibraryItem[];
-  profile: StudioWorkspaceSnapshot["profile"];
-  providerSettings: StudioProviderSettings;
-  queueSettings: StudioQueueSettings;
-  runFiles: StudioRunFile[];
-  runs: GenerationRun[];
-  selectedModelId: string;
-}) {
-  return {
-    schemaVersion: 2,
-    mode: params.appMode,
-    profile: params.profile,
-    providerSettings: params.providerSettings,
-    creditBalance: params.creditBalance,
-    activeCreditPack: params.activeCreditPack,
-    queueSettings: params.queueSettings,
-    folders: params.folders,
-    folderItems: params.folderItems,
-    runFiles: params.runFiles,
-    libraryItems: sanitizeItemsForStorage(params.items),
-    generationRuns: params.runs,
-    draftsByModelId: params.draftsByModelId,
-    selectedModelId: params.selectedModelId,
-    gallerySizeLevel: params.gallerySizeLevel,
-  } satisfies StudioWorkspaceSnapshot;
 }
 
 async function fetchHostedSnapshot() {
@@ -366,7 +217,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       setCreditBalance(nextSnapshot.creditBalance);
       setActiveCreditPack(nextSnapshot.activeCreditPack);
       setQueueSettings(nextSnapshot.queueSettings);
-      setFolders(sortFoldersByOrder(nextSnapshot.folders));
+      setFolders(sortStudioFoldersByOrder(nextSnapshot.folders));
       setFolderItems(nextSnapshot.folderItems);
       setRunFiles(nextSnapshot.runFiles);
       setRuns(nextSnapshot.generationRuns);
@@ -485,7 +336,10 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     setProviderConnectionStatus(nextProviderSettings.falApiKey ? "connected" : "idle");
     setSelectedFolderId(null);
 
-    void hydrateUploadedPreviewUrls(nextSnapshot.libraryItems, previewUrlsRef.current).then(
+    void hydrateUploadedPreviewUrlsForItems(
+      nextSnapshot.libraryItems,
+      previewUrlsRef.current
+    ).then(
       (hydratedItems) => {
         if (cancelled) {
           for (const item of hydratedItems) {
@@ -523,7 +377,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       return;
     }
 
-    const snapshot = buildWorkspaceSnapshot({
+    const snapshot = buildStudioWorkspaceSnapshot({
       activeCreditPack,
       appMode,
       creditBalance,
@@ -601,7 +455,10 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
             return current;
           }
 
-          const concurrencyLimit = getConcurrencyLimit(appMode, queueSettings);
+          const concurrencyLimit = getStudioConcurrencyLimitForMode(
+            appMode,
+            queueSettings
+          );
           const processingCount = current.filter(
             (entry) => entry.status === "processing"
           ).length;
@@ -762,7 +619,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       const elapsedMs = run.startedAt
         ? Math.max(0, Date.now() - Date.parse(run.startedAt))
         : 0;
-      const delayMs = Math.max(400, getCompletionDelayMs(run) - elapsedMs);
+      const delayMs = Math.max(400, getStudioRunCompletionDelayMs(run) - elapsedMs);
 
       const timerId = window.setTimeout(() => {
         completionTimersRef.current.delete(run.id);
@@ -772,7 +629,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
           return;
         }
 
-        if (shouldMockRunFail(latestRun)) {
+        if (shouldStudioMockRunFail(latestRun)) {
           finalizeRunFailure(latestRun);
           return;
         }
@@ -1451,7 +1308,9 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       }
 
       const updatedAt = new Date().toISOString();
-      setFolders((current) => reorderStudioFolders(current, orderedFolderIds, updatedAt));
+      setFolders((current) =>
+        reorderStudioFoldersByIds(current, orderedFolderIds, updatedAt)
+      );
 
       if (appMode !== "hosted") {
         return;
@@ -1887,7 +1746,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       return;
     }
 
-    const estimatedCredits = quoteCredits(selectedModel.id, currentDraft);
+    const estimatedCredits = quoteStudioDraftCredits(selectedModel.id, currentDraft);
 
     const createdAt = new Date().toISOString();
     const runId = createStudioId("run");

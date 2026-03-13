@@ -253,11 +253,8 @@ export interface StudioProviderSaveResult {
   errorMessage?: string;
 }
 
-export interface StudioWorkspaceSnapshot {
-  schemaVersion: number;
-  mode: "local" | "hosted";
+export interface StudioWorkspaceDomainState {
   profile: StudioProfile;
-  providerSettings: StudioProviderSettings;
   creditBalance: StudioCreditBalance | null;
   activeCreditPack: StudioCreditPack | null;
   queueSettings: StudioQueueSettings;
@@ -266,7 +263,18 @@ export interface StudioWorkspaceSnapshot {
   runFiles: StudioRunFile[];
   libraryItems: LibraryItem[];
   generationRuns: GenerationRun[];
+}
+
+export interface StudioWorkspaceUiState {
+  providerSettings: StudioProviderSettings;
   draftsByModelId: Record<string, PersistedStudioDraft>;
   selectedModelId: string;
   gallerySizeLevel: number;
+}
+
+export interface StudioWorkspaceSnapshot
+  extends StudioWorkspaceDomainState,
+    StudioWorkspaceUiState {
+  schemaVersion: number;
+  mode: "local" | "hosted";
 }

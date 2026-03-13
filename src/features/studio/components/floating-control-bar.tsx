@@ -1,15 +1,6 @@
 "use client";
 
-import {
-  ChevronsUpDown,
-  FileText,
-  Image as ImageIcon,
-  Play,
-  Plus,
-  Sparkles,
-  Video,
-  X,
-} from "lucide-react";
+import { Sparkles } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -17,18 +8,31 @@ import {
   useRef,
   useState,
   type DragEvent,
-  type ReactNode,
 } from "react";
 import { cn } from "@/lib/cn";
 import { readDraggedLibraryItems } from "../studio-drag-data";
-import { STUDIO_MEDIA_UPLOAD_ACCEPT } from "../studio-local-runtime-helpers";
-import { getDraftReferencePreviewMediaKind } from "../studio-preview-utils";
 import type {
   DraftReference,
   StudioDraft,
   StudioModelDefinition,
   StudioModelSection,
 } from "../types";
+import {
+  ControlPillConfig,
+  ModelSelectPill,
+  SettingPillButton,
+} from "./floating-control-bar/control-pills";
+import {
+  DragHintToast,
+  DropErrorToast,
+} from "./floating-control-bar/drag-feedback";
+import {
+  AddReferenceButton,
+  getSupportedReferenceAcceptTypes,
+  isReferenceFileSupported,
+  ReferenceFileThumbnail,
+  ReferencePreviewDialog,
+} from "./floating-control-bar/reference-controls";
 
 interface FloatingControlBarProps {
   draft: StudioDraft;
@@ -46,584 +50,6 @@ interface FloatingControlBarProps {
   onRemoveReference: (referenceId: string) => void;
   onSelectModel: (modelId: string) => void;
   onUpdateDraft: (patch: Partial<StudioDraft>) => void;
-}
-
-type ReferencePreviewKind = "image" | "video" | "file";
-
-const AUDIO_EXTENSIONS = new Set([
-  "mp3",
-  "wav",
-  "m4a",
-  "aac",
-  "ogg",
-  "flac",
-  "aiff",
-  "aif",
-  "opus",
-]);
-
-const DOCUMENT_EXTENSIONS = new Set([
-  "pdf",
-  "txt",
-  "md",
-  "markdown",
-  "csv",
-  "json",
-]);
-
-interface ControlPillOption {
-  value: string;
-  label: string;
-  icon?: ReactNode;
-}
-
-interface ControlPillConfig {
-  id: string;
-  label: string;
-  value: string;
-  icon?: ReactNode;
-  options: ControlPillOption[];
-  onValueChange: (value: string) => void;
-}
-
-const ASPECT_RATIO_DIMENSIONS: Record<string, [number, number]> = {
-  "1:1": [12, 12],
-  "16:9": [14, 8],
-  "9:16": [8, 14],
-  "4:5": [10, 12],
-  "5:4": [12, 10],
-  "4:3": [13, 10],
-  "3:4": [10, 13],
-  "3:2": [13, 9],
-  "2:3": [9, 13],
-  "21:9": [15, 6],
-  "9:21": [6, 15],
-};
-
-function ModelKindIcon({
-  kind,
-  className,
-}: {
-  kind: StudioModelDefinition["kind"];
-  className?: string;
-}) {
-  if (kind === "video") {
-    return <Video className={className} />;
-  }
-
-  if (kind === "text") {
-    return <FileText className={className} />;
-  }
-
-  return <ImageIcon className={className} />;
-}
-
-function AspectRatioIcon({
-  ratio,
-  className,
-}: {
-  ratio: string;
-  className?: string;
-}) {
-  const dimensions = ASPECT_RATIO_DIMENSIONS[ratio];
-  if (!dimensions) return null;
-
-  const [width, height] = dimensions;
-
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" className={className}>
-      <rect
-        x={(16 - width) / 2}
-        y={(16 - height) / 2}
-        width={width}
-        height={height}
-        rx="1.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
-    </svg>
-  );
-}
-
-function useDismissiblePopover(
-  open: boolean,
-  onClose: () => void
-): React.RefObject<HTMLDivElement | null> {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-
-    const handlePointerDown = (event: PointerEvent) => {
-      if (!containerRef.current?.contains(event.target as Node)) {
-        onClose();
-      }
-    };
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    };
-
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [open, onClose]);
-
-  return containerRef;
-}
-
-function PillMenu({
-  align = "center",
-  children,
-  open,
-  onClose,
-  trigger,
-}: {
-  align?: "center" | "start";
-  children: ReactNode;
-  open: boolean;
-  onClose: () => void;
-  trigger: ReactNode;
-}) {
-  const containerRef = useDismissiblePopover(open, onClose);
-
-  return (
-    <div ref={containerRef} className="relative">
-      {open ? (
-        <div
-          className={cn(
-            "absolute bottom-full z-30 mb-2 w-fit min-w-36 rounded-xl border border-white/10 bg-background/98 p-2 shadow-[0_18px_48px_rgba(0,0,0,0.45)] backdrop-blur-xl",
-            align === "center" ? "left-1/2 -translate-x-1/2" : "left-0"
-          )}
-        >
-          <div className="space-y-0.5">{children}</div>
-        </div>
-      ) : null}
-      {trigger}
-    </div>
-  );
-}
-
-function pillTriggerClassName() {
-  return "flex h-7 w-fit items-center gap-1.5 whitespace-nowrap rounded-md border-0 bg-muted/60 px-2.5 py-1 text-xs font-medium shadow-sm transition-all hover:bg-muted/90 dark:bg-[linear-gradient(to_bottom,rgba(255,255,255,0.10),rgba(255,255,255,0.05))] dark:shadow-[0_1px_2px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.04)] dark:hover:bg-[linear-gradient(to_bottom,rgba(255,255,255,0.16),rgba(255,255,255,0.09))] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
-}
-
-function PillOptionButton({
-  active,
-  children,
-  onClick,
-}: {
-  active: boolean;
-  children: ReactNode;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm whitespace-nowrap transition-colors",
-        active ? "bg-primary/10 text-primary" : "text-foreground hover:bg-muted/60"
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
-function SettingPillButton({ pill }: { pill: ControlPillConfig }) {
-  const [open, setOpen] = useState(false);
-  const selectedLabel =
-    pill.options.find((option) => option.value === pill.value)?.label ?? pill.value;
-
-  return (
-    <PillMenu
-      open={open}
-      onClose={() => setOpen(false)}
-      trigger={
-        <button
-          type="button"
-          onClick={() => setOpen((current) => !current)}
-          aria-label={pill.label}
-          className={pillTriggerClassName()}
-        >
-          {pill.icon ? (
-            <span className="flex shrink-0 items-center">{pill.icon}</span>
-          ) : null}
-          <span>{selectedLabel}</span>
-          <ChevronsUpDown className="size-4 text-muted-foreground" />
-        </button>
-      }
-    >
-      {pill.options.map((option) => (
-        <PillOptionButton
-          key={option.value}
-          active={option.value === pill.value}
-          onClick={() => {
-            pill.onValueChange(option.value);
-            setOpen(false);
-          }}
-        >
-          {option.icon ? (
-            <span className="flex shrink-0 items-center">{option.icon}</span>
-          ) : null}
-          <span className="flex-1">{option.label}</span>
-          {ASPECT_RATIO_DIMENSIONS[option.value] ? (
-            <AspectRatioIcon ratio={option.value} className="shrink-0 opacity-70" />
-          ) : null}
-        </PillOptionButton>
-      ))}
-    </PillMenu>
-  );
-}
-
-function ModelSelectPill({
-  models,
-  sections,
-  selectedModelId,
-  onSelectModel,
-}: {
-  models: StudioModelDefinition[];
-  sections: ReadonlyArray<{ id: StudioModelSection; title: string }>;
-  selectedModelId: string;
-  onSelectModel: (modelId: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const selectedModel =
-    models.find((entry) => entry.id === selectedModelId) ?? models[0];
-
-  return (
-    <PillMenu
-      align="start"
-      open={open}
-      onClose={() => setOpen(false)}
-      trigger={
-        <button
-          type="button"
-          onClick={() => setOpen((current) => !current)}
-          aria-label="Select model"
-          className={pillTriggerClassName()}
-        >
-          <ModelKindIcon
-            kind={selectedModel.kind}
-            className="size-3 shrink-0 opacity-50"
-          />
-          <span className="truncate">{selectedModel.name}</span>
-          <ChevronsUpDown className="size-4 text-muted-foreground" />
-        </button>
-      }
-    >
-      {sections.flatMap((section) =>
-        models
-          .filter((entry) => entry.section === section.id)
-          .map((entry) => {
-            const active = entry.id === selectedModelId;
-            return (
-              <PillOptionButton
-                key={entry.id}
-                active={active}
-                onClick={() => {
-                  onSelectModel(entry.id);
-                  setOpen(false);
-                }}
-              >
-                <ModelKindIcon kind={entry.kind} className="size-3.5 shrink-0" />
-                <span className="truncate">{entry.name}</span>
-              </PillOptionButton>
-            );
-          })
-      )}
-    </PillMenu>
-  );
-}
-
-function AddReferenceButton({
-  acceptTypes,
-  canAdd,
-  onAdd,
-  variant = "small",
-}: {
-  acceptTypes: string;
-  canAdd: boolean;
-  onAdd: (files: File[]) => void;
-  variant?: "small" | "thumbnail";
-}) {
-  return (
-    <label
-      className={cn(
-        "flex shrink-0 items-center justify-center border border-dashed border-border/70 text-muted-foreground transition-colors",
-        canAdd
-          ? "cursor-pointer hover:bg-muted/50 hover:text-foreground"
-          : "cursor-not-allowed opacity-50",
-        variant === "thumbnail" ? "size-14 rounded-lg" : "size-7 rounded-md"
-      )}
-      aria-label="Add reference file"
-      title="Add reference file"
-    >
-      <input
-        type="file"
-        accept={acceptTypes}
-        multiple
-        className="hidden"
-        disabled={!canAdd}
-        onChange={(event) => {
-          onAdd(Array.from(event.target.files ?? []));
-          event.target.value = "";
-        }}
-      />
-      <Plus className={variant === "thumbnail" ? "size-5" : "size-3.5"} />
-    </label>
-  );
-}
-
-function getReferencePreviewKind(
-  reference: Pick<DraftReference, "kind" | "mimeType" | "previewUrl">
-): ReferencePreviewKind {
-  return getDraftReferencePreviewMediaKind(reference);
-}
-
-function getFileExtension(fileName: string): string | null {
-  const trimmed = fileName.trim().toLowerCase();
-  if (!trimmed.includes(".")) return null;
-  return trimmed.split(".").pop()?.trim() ?? null;
-}
-
-function getSupportedReferenceAcceptTypes(model: StudioModelDefinition) {
-  const acceptedKinds = model.acceptedReferenceKinds ?? ["image", "video"];
-  const acceptParts: string[] = [];
-
-  if (acceptedKinds.includes("image")) {
-    acceptParts.push("image/*");
-  }
-  if (acceptedKinds.includes("video")) {
-    acceptParts.push("video/*");
-  }
-  if (acceptedKinds.includes("audio")) {
-    acceptParts.push("audio/*");
-  }
-  if (acceptedKinds.includes("document")) {
-    acceptParts.push(
-      ".pdf",
-      ".txt",
-      ".md",
-      ".markdown",
-      ".csv",
-      ".json",
-      "application/pdf",
-      "text/plain",
-      "text/markdown",
-      "text/csv",
-      "application/json"
-    );
-  }
-
-  return acceptParts.length > 0
-    ? Array.from(new Set(acceptParts)).join(",")
-    : STUDIO_MEDIA_UPLOAD_ACCEPT;
-}
-
-function isReferenceFileSupported(model: StudioModelDefinition, file: File) {
-  const mimeType = file.type.trim().toLowerCase();
-  const extension = getFileExtension(file.name);
-  const acceptedKinds = model.acceptedReferenceKinds ?? ["image", "video"];
-
-  if (mimeType.startsWith("image/")) {
-    return acceptedKinds.includes("image");
-  }
-  if (mimeType.startsWith("video/")) {
-    return acceptedKinds.includes("video");
-  }
-  if (mimeType.startsWith("audio/")) {
-    return acceptedKinds.includes("audio");
-  }
-
-  if (
-    acceptedKinds.includes("document") &&
-    (mimeType === "application/pdf" ||
-      mimeType === "text/plain" ||
-      mimeType === "text/markdown" ||
-      mimeType === "text/csv" ||
-      mimeType === "application/json")
-  ) {
-    return true;
-  }
-
-  if (!extension) {
-    return false;
-  }
-
-  if (acceptedKinds.includes("audio") && AUDIO_EXTENSIONS.has(extension)) {
-    return true;
-  }
-
-  if (acceptedKinds.includes("document") && DOCUMENT_EXTENSIONS.has(extension)) {
-    return true;
-  }
-
-  return false;
-}
-
-function ReferenceFileThumbnail({
-  reference,
-  onPreviewReference,
-  onRemove,
-}: {
-  reference: DraftReference;
-  onPreviewReference: (reference: DraftReference) => void;
-  onRemove: () => void;
-}) {
-  const previewKind = getReferencePreviewKind(reference);
-  const previewUrl =
-    previewKind === "file" ? null : reference.previewUrl;
-
-  return (
-    <div
-      className="group relative size-14 shrink-0 overflow-hidden rounded-lg border border-white/[0.08] bg-muted/70 transition-transform duration-200 hover:scale-105"
-      title={reference.title}
-    >
-      <button
-        type="button"
-        onClick={() => onPreviewReference(reference)}
-        className="absolute inset-0 z-10 cursor-zoom-in rounded-lg outline-none transition focus-visible:ring-2 focus-visible:ring-primary/60"
-        aria-label={`Preview ${reference.title}`}
-      />
-
-      {previewKind === "video" && previewUrl ? (
-        <div className="relative size-full">
-          <video
-            src={previewUrl}
-            muted
-            playsInline
-            preload="metadata"
-            className="size-full object-cover"
-          />
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <span className="rounded-full bg-black/45 p-1.5 backdrop-blur-sm">
-              <Play className="size-4 text-white" />
-            </span>
-          </div>
-        </div>
-      ) : previewUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={previewUrl}
-          alt={reference.title}
-          className="size-full object-cover"
-        />
-      ) : (
-        <div className="flex size-full items-center justify-center bg-muted/80">
-          <FileText className="size-4 text-muted-foreground/60" />
-        </div>
-      )}
-
-      <button
-        type="button"
-        onClick={(event) => {
-          event.stopPropagation();
-          onRemove();
-        }}
-        className="absolute right-0 top-0 z-20 flex size-5 items-center justify-center rounded-full bg-black/70 text-white opacity-0 transition-opacity hover:bg-black/85 group-hover:opacity-100 group-focus-within:opacity-100"
-        aria-label={`Remove ${reference.title}`}
-      >
-        <X className="size-3 text-white" />
-      </button>
-    </div>
-  );
-}
-
-function ReferencePreviewDialog({
-  reference,
-  onClose,
-}: {
-  reference: DraftReference | null;
-  onClose: () => void;
-}) {
-  const previewKind = useMemo(
-    () => (reference ? getReferencePreviewKind(reference) : null),
-    [reference]
-  );
-  const previewUrl =
-    reference && previewKind !== "file" ? reference.previewUrl : null;
-
-  if (!reference) {
-    return null;
-  }
-
-  return (
-    <div
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) {
-          onClose();
-        }
-      }}
-    >
-      <div className="relative flex max-h-[80vh] w-full max-w-4xl items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl">
-        <button
-          type="button"
-          onClick={onClose}
-          className="absolute right-3 top-3 z-10 flex size-9 items-center justify-center rounded-full border border-white/10 bg-black/50 text-white transition hover:bg-black/70"
-          aria-label="Close preview"
-        >
-          <X className="size-4" />
-        </button>
-
-        {previewKind === "video" && previewUrl ? (
-          <video
-            src={previewUrl}
-            controls
-            autoPlay
-            playsInline
-            className="max-h-[80vh] w-full bg-black object-contain"
-          />
-        ) : previewKind === "image" && previewUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={previewUrl}
-            alt={reference.title}
-            className="max-h-[80vh] w-full object-contain"
-          />
-        ) : (
-          <div className="flex min-h-[18rem] w-full flex-col items-center justify-center gap-4 px-8 py-10 text-center text-white">
-            <FileText className="size-8 text-white/70" />
-            <div className="space-y-1">
-              <div className="text-sm font-medium">{reference.title}</div>
-              <div className="text-xs text-white/60">
-                Preview is not available for this file type.
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function DropErrorToast({ message }: { message: string }) {
-  return (
-    <div className="animate-in fade-in slide-in-from-bottom-2 absolute inset-x-0 -top-10 flex justify-center">
-      <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive shadow-lg backdrop-blur-sm">
-        {message}
-      </div>
-    </div>
-  );
-}
-
-function DragHintToast({ message }: { message: string }) {
-  return (
-    <div className="animate-in fade-in slide-in-from-bottom-2 absolute inset-x-0 -top-10 flex justify-center">
-      <div className="rounded-lg border border-primary/30 bg-primary/12 px-3 py-1.5 text-xs font-medium text-primary shadow-lg backdrop-blur-sm">
-        {message}
-      </div>
-    </div>
-  );
 }
 
 export function FloatingControlBar({
@@ -654,7 +80,6 @@ export function FloatingControlBar({
   const maxReferenceFiles = model.maxReferenceFiles ?? 6;
   const canAddReferences = draft.references.length < maxReferenceFiles;
   const hasReferences = draft.references.length > 0;
-  const acceptsDrop = true;
   const referenceAcceptTypes = getSupportedReferenceAcceptTypes(model);
 
   useEffect(() => {
@@ -723,7 +148,6 @@ export function FloatingControlBar({
 
   const handleDragEnter = useCallback(
     (event: DragEvent<HTMLDivElement>) => {
-      if (!acceptsDrop) return;
       event.preventDefault();
 
       const internalItemPayload = readDraggedLibraryItems(event.dataTransfer);
@@ -744,12 +168,11 @@ export function FloatingControlBar({
         setDragOver(true);
       }
     },
-    [acceptsDrop, getDropHint, model.supportsReferences]
+    [getDropHint, model.supportsReferences]
   );
 
   const handleDragOver = useCallback(
     (event: DragEvent<HTMLDivElement>) => {
-      if (!acceptsDrop) return;
       event.preventDefault();
       const internalItemPayload = readDraggedLibraryItems(event.dataTransfer);
       if (internalItemPayload) {
@@ -767,30 +190,25 @@ export function FloatingControlBar({
           : "Drop to use as prompt"
       );
     },
-    [acceptsDrop, getDropHint, model.supportsReferences]
+    [getDropHint, model.supportsReferences]
   );
 
-  const handleDragLeave = useCallback(
-    (event: DragEvent<HTMLDivElement>) => {
-      if (!acceptsDrop) return;
-      event.preventDefault();
-      const nextTarget = event.relatedTarget as Node | null;
-      if (nextTarget && event.currentTarget.contains(nextTarget)) {
-        return;
-      }
+  const handleDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const nextTarget = event.relatedTarget as Node | null;
+    if (nextTarget && event.currentTarget.contains(nextTarget)) {
+      return;
+    }
 
-      dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
-      if (dragDepthRef.current === 0) {
-        setDragOver(false);
-        setDragHint(null);
-      }
-    },
-    [acceptsDrop]
-  );
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) {
+      setDragOver(false);
+      setDragHint(null);
+    }
+  }, []);
 
   const handleDrop = useCallback(
     async (event: DragEvent<HTMLDivElement>) => {
-      if (!acceptsDrop) return;
       event.preventDefault();
       dragDepthRef.current = 0;
       setDragOver(false);
@@ -821,7 +239,6 @@ export function FloatingControlBar({
       }
     },
     [
-      acceptsDrop,
       addDroppedReferenceFiles,
       draft.prompt,
       onDropLibraryItems,
