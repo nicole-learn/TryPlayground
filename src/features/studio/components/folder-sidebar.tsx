@@ -11,7 +11,6 @@ import type { StudioFolder } from "../types";
 
 interface FolderSidebarProps {
   folders: StudioFolder[];
-  selectedFolderCount: number;
   selectedFolderId: string | null;
   onCreateFolder: () => void;
   onDeleteFolder: (folderId: string) => void;
@@ -115,7 +114,6 @@ function FolderRow({
 
 export function FolderSidebar({
   folders,
-  selectedFolderCount,
   selectedFolderId,
   onCreateFolder,
   onDeleteFolder,
@@ -142,13 +140,6 @@ export function FolderSidebar({
           ))}
         </div>
       </div>
-
-      {selectedFolderId ? (
-        <div className="px-2 py-3 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-          Selected folder has {selectedFolderCount} item
-          {selectedFolderCount === 1 ? "" : "s"}
-        </div>
-      ) : null}
 
       <div className="pt-2">
         <button

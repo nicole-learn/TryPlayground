@@ -321,7 +321,6 @@ export function StudioPage({
         rightSidebar={
           <FolderSidebar
             folders={studio.folders}
-            selectedFolderCount={studio.selectedFolderItems.length}
             selectedFolderId={studio.selectedFolderId}
             onCreateFolder={studio.openCreateFolder}
             onDeleteFolder={studio.deleteFolder}
