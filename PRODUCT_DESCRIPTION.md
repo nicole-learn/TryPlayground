@@ -158,6 +158,28 @@ That means users can understand the hosted experience in plain terms:
 
 The goal is to keep the pricing model predictable instead of mixing subscriptions, provider bills, and multiple pricing systems.
 
+## Queue Limits And Fairness
+
+Vyde Labs keeps queueing simple and predictable in both the local and hosted versions.
+
+The rule is:
+
+- each user can have up to 100 active queued or generating items at one time
+- this 100-item cap applies in both local and hosted mode
+- if a user tries to submit another generation after reaching that cap, Vyde Labs shows a simple popup that says:
+
+`limit of 100 concurrent queues/ generations reached, please wait for your generations to finish before continuing.`
+
+Queued items can be canceled from the UI. Items that have already started generating cannot be canceled from the UI.
+
+The hosted version is designed to share available generation capacity fairly across active users:
+
+- if only one user is active, they can use the full available provider capacity
+- if multiple users are active at the same time, available generation slots are shared evenly between them
+- if there are more active users than available slots, the slots rotate fairly so users continue taking turns instead of one user monopolizing capacity
+
+The local version uses the same 100-item cap, but with a simpler local queue controller because it only has to manage one user's machine at a time.
+
 ### Why some users will prefer hosted
 
 The hosted version is best for users who want:
