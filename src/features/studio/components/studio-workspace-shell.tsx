@@ -15,7 +15,7 @@ interface StudioWorkspaceShellProps {
   topBar: ReactNode;
 }
 
-const DESKTOP_TOP_BAR_HEIGHT = 60;
+const DESKTOP_TOP_BAR_HEIGHT = 54;
 const DESKTOP_RIGHT_SIDEBAR_WIDTH = 220;
 const DEFAULT_PRIMARY_WIDTH = 64;
 const MIN_PRIMARY_WIDTH = 34;

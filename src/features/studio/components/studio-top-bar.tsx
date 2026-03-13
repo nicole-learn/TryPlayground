@@ -43,7 +43,7 @@ function ActionPillButton({
       aria-label={ariaLabel}
       title={ariaLabel}
       className={cn(
-        "inline-flex h-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full border px-4 text-[13px] font-medium tracking-tight transition-all duration-150 active:scale-[0.98]",
+        "inline-flex h-[34px] shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full border px-3.5 text-[12.5px] font-medium tracking-tight transition-all duration-150 active:scale-[0.98]",
         active
           ? "border-primary/40 bg-primary/16 text-primary"
           : "border-white/10 bg-white/[0.03] text-foreground/92 hover:bg-white/[0.06]",
@@ -71,17 +71,17 @@ export function StudioTopBar({
   onSizeLevelChange,
 }: StudioTopBarProps) {
   return (
-    <header className="relative flex h-full items-center gap-3 border-b border-white/8 bg-black px-3">
+    <header className="relative flex h-full items-center gap-2.5 border-b border-white/8 bg-black px-2.5">
       <div className="flex min-w-0 flex-1 items-center">
-        <div className="flex min-w-0 items-center gap-2.5">
+        <div className="flex min-w-0 items-center gap-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/logo-dark.svg"
             alt="Vyde Labs"
-            className="h-7 w-auto shrink-0"
+            className="h-6 w-auto shrink-0"
             draggable={false}
           />
-          <div className="min-w-0 text-[18px] font-semibold tracking-tight">
+          <div className="min-w-0 text-[16px] font-semibold tracking-tight">
             <span className="text-primary">Vyde</span>
             <span className="text-foreground"> Labs</span>
           </div>
@@ -96,9 +96,9 @@ export function StudioTopBar({
               onClick={onClearSelection}
               aria-label="Clear selected assets"
               title="Clear selected assets"
-              className="inline-flex h-9 items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 text-[13px] font-medium text-foreground transition-all duration-150 hover:bg-white/[0.06] active:scale-[0.98]"
+              className="inline-flex h-[34px] items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 text-[12.5px] font-medium text-foreground transition-all duration-150 hover:bg-white/[0.06] active:scale-[0.98]"
             >
-              <X className="size-3.5" />
+              <X className="size-[13px]" />
               <span>{`${selectedItemCount} selected`}</span>
             </button>
 
@@ -107,7 +107,7 @@ export function StudioTopBar({
               className="min-w-[108px] border-primary/35 bg-primary text-primary-foreground hover:bg-primary/92"
               onClick={onDownloadSelected}
             >
-              <Download className="size-3.5" />
+              <Download className="size-[13px]" />
               <span>Download</span>
             </ActionPillButton>
 
@@ -116,7 +116,7 @@ export function StudioTopBar({
               className="min-w-[96px] border-red-500/28 bg-red-500/90 text-white hover:bg-red-500"
               onClick={onDeleteSelected}
             >
-              <Trash2 className="size-3.5" />
+              <Trash2 className="size-[13px]" />
               <span>Delete</span>
             </ActionPillButton>
           </div>
@@ -130,7 +130,7 @@ export function StudioTopBar({
           className="min-w-[142px]"
           onClick={onToggleSelectionMode}
         >
-          <SquareMousePointer className="size-3.5" />
+          <SquareMousePointer className="size-[13px]" />
           <span>Selection Mode</span>
         </ActionPillButton>
 
@@ -139,7 +139,7 @@ export function StudioTopBar({
           className="min-w-[124px]"
           onClick={onOpenCreateText}
         >
-          <FileText className="size-3.5" />
+          <FileText className="size-[13px]" />
           <span>Add Prompt</span>
         </ActionPillButton>
 
@@ -148,10 +148,10 @@ export function StudioTopBar({
           className="min-w-[128px]"
           onClick={onOpenUpload}
         >
-          <Upload className="size-3.5" />
+          <Upload className="size-[13px]" />
           <span>Upload Files</span>
         </ActionPillButton>
-        <div className="flex h-9 w-[166px] shrink-0 items-center rounded-full bg-white/[0.03] px-3">
+        <div className="flex h-[34px] w-[166px] shrink-0 items-center rounded-full bg-white/[0.03] px-3">
           <Slider
             min={0}
             max={6}
