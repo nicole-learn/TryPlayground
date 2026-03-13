@@ -7,7 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
-  type DragEvent,
+  type DragEvent as ReactDragEvent,
 } from "react";
 import { cn } from "@/lib/cn";
 import { readDraggedLibraryItems } from "../studio-drag-data";
@@ -68,6 +68,7 @@ export function FloatingControlBar({
   onUpdateDraft,
 }: FloatingControlBarProps) {
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const [previewReference, setPreviewReference] = useState<DraftReference | null>(
     null
   );
@@ -98,6 +99,51 @@ export function FloatingControlBar({
       }
     };
   }, []);
+
+  const resetDragState = useCallback(() => {
+    dragDepthRef.current = 0;
+    setDragOver(false);
+    setDragHint(null);
+  }, []);
+
+  useEffect(() => {
+    if (!dragOver) {
+      return;
+    }
+
+    const handleDocumentDragOver = (event: globalThis.DragEvent) => {
+      const container = containerRef.current;
+      if (!container) {
+        resetDragState();
+        return;
+      }
+
+      const rect = container.getBoundingClientRect();
+      const isInside =
+        event.clientX >= rect.left &&
+        event.clientX <= rect.right &&
+        event.clientY >= rect.top &&
+        event.clientY <= rect.bottom;
+
+      if (!isInside) {
+        resetDragState();
+      }
+    };
+
+    const handleDocumentDragEnd = () => {
+      resetDragState();
+    };
+
+    document.addEventListener("dragover", handleDocumentDragOver);
+    document.addEventListener("dragend", handleDocumentDragEnd);
+    document.addEventListener("drop", handleDocumentDragEnd);
+
+    return () => {
+      document.removeEventListener("dragover", handleDocumentDragOver);
+      document.removeEventListener("dragend", handleDocumentDragEnd);
+      document.removeEventListener("drop", handleDocumentDragEnd);
+    };
+  }, [dragOver, resetDragState]);
 
   const showDropError = useCallback((message: string) => {
     if (dropErrorTimerRef.current) {
@@ -148,7 +194,7 @@ export function FloatingControlBar({
   );
 
   const handleDragEnter = useCallback(
-    (event: DragEvent<HTMLDivElement>) => {
+    (event: ReactDragEvent<HTMLDivElement>) => {
       event.preventDefault();
 
       const internalItemPayload = readDraggedLibraryItems(event.dataTransfer);
@@ -161,7 +207,7 @@ export function FloatingControlBar({
             : "This model doesn't support references yet"
         );
       } else {
-        setDragHint("Drop to use as prompt");
+        setDragHint(null);
       }
 
       dragDepthRef.current += 1;
@@ -173,7 +219,7 @@ export function FloatingControlBar({
   );
 
   const handleDragOver = useCallback(
-    (event: DragEvent<HTMLDivElement>) => {
+    (event: ReactDragEvent<HTMLDivElement>) => {
       event.preventDefault();
       const internalItemPayload = readDraggedLibraryItems(event.dataTransfer);
       if (internalItemPayload) {
@@ -188,13 +234,13 @@ export function FloatingControlBar({
           ? model.supportsReferences
             ? "Drop files to add as references"
             : "This model doesn't support references yet"
-          : "Drop to use as prompt"
+          : null
       );
     },
     [getDropHint, model.supportsReferences]
   );
 
-  const handleDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
+  const handleDragLeave = useCallback((event: ReactDragEvent<HTMLDivElement>) => {
     event.preventDefault();
     const nextTarget = event.relatedTarget as Node | null;
     if (nextTarget && event.currentTarget.contains(nextTarget)) {
@@ -203,17 +249,14 @@ export function FloatingControlBar({
 
     dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
     if (dragDepthRef.current === 0) {
-      setDragOver(false);
-      setDragHint(null);
+      resetDragState();
     }
-  }, []);
+  }, [resetDragState]);
 
   const handleDrop = useCallback(
-    async (event: DragEvent<HTMLDivElement>) => {
+    async (event: ReactDragEvent<HTMLDivElement>) => {
       event.preventDefault();
-      dragDepthRef.current = 0;
-      setDragOver(false);
-      setDragHint(null);
+      resetDragState();
 
       const internalItemPayload = readDraggedLibraryItems(event.dataTransfer);
       if (internalItemPayload) {
@@ -244,6 +287,7 @@ export function FloatingControlBar({
       draft.prompt,
       onDropLibraryItems,
       onUpdateDraft,
+      resetDragState,
       showDropError,
     ]
   );
@@ -384,6 +428,7 @@ export function FloatingControlBar({
         <div className="relative w-full max-w-6xl">
           <div className="pointer-events-auto">
             <div
+              ref={containerRef}
               style={{
                 backgroundImage:
                   "linear-gradient(165deg, color-mix(in oklch, var(--primary) 18%, black) 0%, color-mix(in oklch, var(--primary) 10%, black) 54%, color-mix(in oklch, var(--primary) 26%, black) 100%)",

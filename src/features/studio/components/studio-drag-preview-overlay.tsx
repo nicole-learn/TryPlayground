@@ -36,6 +36,9 @@ export function StudioDragPreviewOverlay({
     return null;
   }
 
+  const DRAG_PREVIEW_SIZE_PX = 58;
+  const DRAG_PREVIEW_CURSOR_OFFSET_PX = 10;
+
   const previewMediaKind = getPreviewMediaKind({
     kind: preview.leadItem.kind,
     mimeType: preview.leadItem.mimeType,
@@ -46,9 +49,9 @@ export function StudioDragPreviewOverlay({
 
   return (
     <div
-      className="pointer-events-none fixed left-0 top-0 z-[95]"
+      className="pointer-events-none fixed left-0 top-0 z-[120]"
       style={{
-        transform: `translate3d(${preview.x + 14}px, ${preview.y + 14}px, 0)`,
+        transform: `translate3d(${preview.x - DRAG_PREVIEW_SIZE_PX - DRAG_PREVIEW_CURSOR_OFFSET_PX}px, ${preview.y - DRAG_PREVIEW_SIZE_PX - DRAG_PREVIEW_CURSOR_OFFSET_PX}px, 0)`,
       }}
     >
       <div className="relative">
