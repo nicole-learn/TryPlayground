@@ -34,6 +34,7 @@ import {
   ReferenceFileThumbnail,
   ReferencePreviewDialog,
 } from "./floating-control-bar/reference-controls";
+import { FrameSlot } from "./floating-control-bar/frame-controls";
 
 interface FloatingControlBarProps {
   draft: StudioDraft;
@@ -49,8 +50,15 @@ interface FloatingControlBarProps {
   onDropLibraryItems: (itemIds: string[]) => Promise<string | null> | string | null;
   onGenerate: () => void;
   onRemoveReference: (referenceId: string) => void;
+  onClearStartFrame: () => void;
+  onClearEndFrame: () => void;
   onSelectModel: (modelId: string) => void;
+  onSetStartFrame: (file: File) => void;
+  onSetEndFrame: (file: File) => void;
+  onSetVideoInputMode: (mode: "frames" | "references") => void;
   onUpdateDraft: (patch: Partial<StudioDraft>) => void;
+  onDropLibraryItemsToStartFrame: (itemIds: string[]) => Promise<string | null> | string | null;
+  onDropLibraryItemsToEndFrame: (itemIds: string[]) => Promise<string | null> | string | null;
 }
 
 export function FloatingControlBar({
@@ -64,8 +72,15 @@ export function FloatingControlBar({
   onDropLibraryItems,
   onGenerate,
   onRemoveReference,
+  onClearStartFrame,
+  onClearEndFrame,
   onSelectModel,
+  onSetStartFrame,
+  onSetEndFrame,
+  onSetVideoInputMode,
   onUpdateDraft,
+  onDropLibraryItemsToStartFrame,
+  onDropLibraryItemsToEndFrame,
 }: FloatingControlBarProps) {
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -80,8 +95,12 @@ export function FloatingControlBar({
 
   const canGenerate = canGenerateWithDraft(model, draft);
   const maxReferenceFiles = model.maxReferenceFiles ?? 6;
-  const canAddReferences = draft.references.length < maxReferenceFiles;
-  const hasReferences = draft.references.length > 0;
+  const supportsFrameInputs = model.kind === "video" && model.supportsFrameInputs;
+  const showFrameControls = supportsFrameInputs && draft.videoInputMode === "frames";
+  const showReferenceControls = model.supportsReferences && !showFrameControls;
+  const canAddReferences =
+    showReferenceControls && draft.references.length < maxReferenceFiles;
+  const hasReferences = showReferenceControls && draft.references.length > 0;
   const referenceAcceptTypes = getSupportedReferenceAcceptTypes(model);
 
   useEffect(() => {
@@ -202,8 +221,10 @@ export function FloatingControlBar({
         setDragHint(getDropHint(internalItemPayload.itemIds));
       } else if (event.dataTransfer.files.length > 0) {
         setDragHint(
-          model.supportsReferences
+          showReferenceControls
             ? "Drop files to add as references"
+            : showFrameControls
+              ? "Drop image files onto Start or End frame"
             : "This model doesn't support references yet"
         );
       } else {
@@ -215,7 +236,7 @@ export function FloatingControlBar({
         setDragOver(true);
       }
     },
-    [getDropHint, model.supportsReferences]
+    [getDropHint, showFrameControls, showReferenceControls]
   );
 
   const handleDragOver = useCallback(
@@ -231,13 +252,15 @@ export function FloatingControlBar({
       event.dataTransfer.dropEffect = "copy";
       setDragHint(
         event.dataTransfer.files.length > 0
-          ? model.supportsReferences
+          ? showReferenceControls
             ? "Drop files to add as references"
+            : showFrameControls
+              ? "Drop image files onto Start or End frame"
             : "This model doesn't support references yet"
           : null
       );
     },
-    [getDropHint, model.supportsReferences]
+    [getDropHint, showFrameControls, showReferenceControls]
   );
 
   const handleDragLeave = useCallback((event: ReactDragEvent<HTMLDivElement>) => {
@@ -269,7 +292,11 @@ export function FloatingControlBar({
 
       const droppedFiles = Array.from(event.dataTransfer.files ?? []);
       if (droppedFiles.length > 0) {
-        addDroppedReferenceFiles(droppedFiles);
+        if (showReferenceControls) {
+          addDroppedReferenceFiles(droppedFiles);
+        } else if (showFrameControls) {
+          showDropError("Drop image files onto Start or End frame.");
+        }
         return;
       }
 
@@ -288,6 +315,8 @@ export function FloatingControlBar({
       onDropLibraryItems,
       onUpdateDraft,
       resetDragState,
+      showFrameControls,
+      showReferenceControls,
       showDropError,
     ]
   );
@@ -381,6 +410,20 @@ export function FloatingControlBar({
     }
 
     if (model.kind === "video" && model.durationOptions) {
+      if (model.supportsFrameInputs && model.supportsReferences) {
+        pills.push({
+          id: "video-input-mode",
+          label: "Input",
+          value: draft.videoInputMode,
+          options: [
+            { value: "frames", label: "Frames" },
+            { value: "references", label: "References" },
+          ],
+          onValueChange: (value) =>
+            onSetVideoInputMode(value as "frames" | "references"),
+        });
+      }
+
       pills.push({
         id: "duration",
         label: "Duration",
@@ -417,8 +460,10 @@ export function FloatingControlBar({
     draft.outputFormat,
     draft.resolution,
     draft.speakingRate,
+    draft.videoInputMode,
     draft.voice,
     model,
+    onSetVideoInputMode,
     onUpdateDraft,
   ]);
 
@@ -478,7 +523,7 @@ export function FloatingControlBar({
                   ) : null}
 
                   <div className="flex items-start">
-                    {model.supportsReferences && !hasReferences ? (
+                    {showReferenceControls && !hasReferences ? (
                       <div className="flex shrink-0 items-center pl-4 pt-3.5">
                         <AddReferenceButton
                           acceptTypes={referenceAcceptTypes}
@@ -516,6 +561,30 @@ export function FloatingControlBar({
                 </div>
 
                 <div className="flex shrink-0 items-end gap-2 p-3">
+                  {showFrameControls ? (
+                    <div className="flex items-stretch gap-1.5">
+                      <FrameSlot
+                        frame={draft.startFrame}
+                        label="Start"
+                        onAddFile={onSetStartFrame}
+                        onDropLibraryItems={onDropLibraryItemsToStartFrame}
+                        onPreview={setPreviewReference}
+                        onRemove={onClearStartFrame}
+                        onShowError={showDropError}
+                      />
+                      {model.supportsEndFrame ? (
+                        <FrameSlot
+                          frame={draft.endFrame}
+                          label="End"
+                          onAddFile={onSetEndFrame}
+                          onDropLibraryItems={onDropLibraryItemsToEndFrame}
+                          onPreview={setPreviewReference}
+                          onRemove={onClearEndFrame}
+                          onShowError={showDropError}
+                        />
+                      ) : null}
+                    </div>
+                  ) : null}
                   <button
                     type="button"
                     disabled={!canGenerate}

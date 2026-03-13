@@ -2,6 +2,7 @@ import type { StudioAppMode } from "./studio-app-mode";
 import type {
   GenerationRun,
   StudioDraft,
+  StudioGenerationRequestMode,
   StudioModelDefinition,
   StudioQueueSettings,
 } from "./types";
@@ -118,6 +119,43 @@ export function getStudioRunCompletionDelayMs(run: Pick<RunTimingShape, "kind">)
 
 export function shouldStudioMockRunFail(run: Pick<RunTimingShape, "prompt">) {
   return /\b(fail|error)\b/i.test(run.prompt);
+}
+
+export function resolveStudioGenerationRequestMode(
+  model: Pick<
+    StudioModelDefinition,
+    "kind" | "requestMode" | "supportsFrameInputs" | "supportsEndFrame"
+  >,
+  draft: Pick<
+    StudioDraft,
+    "references" | "startFrame" | "endFrame" | "videoInputMode"
+  >
+): StudioGenerationRequestMode {
+  if (model.kind !== "video") {
+    return model.requestMode;
+  }
+
+  if (model.supportsFrameInputs && draft.videoInputMode === "frames") {
+    if (draft.startFrame && draft.endFrame && model.supportsEndFrame) {
+      return "first-last-frame-to-video";
+    }
+
+    if (draft.startFrame || draft.endFrame) {
+      return "image-to-video";
+    }
+
+    return "text-to-video";
+  }
+
+  if (draft.references.length > 1) {
+    return "reference-to-video";
+  }
+
+  if (draft.references.length > 0) {
+    return "image-to-video";
+  }
+
+  return "text-to-video";
 }
 
 export function canGenerateWithDraft(

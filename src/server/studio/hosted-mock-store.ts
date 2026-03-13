@@ -7,12 +7,14 @@ import {
   createStudioId,
   createStudioSeedSnapshot,
   hydrateDraft,
+  toPersistedDraft,
 } from "@/features/studio/studio-local-runtime-data";
 import { createAudioThumbnailUrl } from "@/features/studio/studio-asset-thumbnails";
 import {
   getHostedStudioFairShare,
   getStudioRunCompletionDelayMs,
   quoteStudioDraftCredits,
+  resolveStudioGenerationRequestMode,
   shouldStudioMockRunFail,
 } from "@/features/studio/studio-generation-rules";
 import {
@@ -79,11 +81,17 @@ function createHostedMutationInputPayload(params: {
   prompt: string;
   requestMode: GenerationRun["requestMode"];
   referenceCount: number;
+  startFrameCount: number;
+  endFrameCount: number;
+  videoInputMode: PersistedStudioDraft["videoInputMode"];
 }) {
   return {
     prompt: params.prompt,
     request_mode: params.requestMode,
     reference_count: params.referenceCount,
+    start_frame_count: params.startFrameCount,
+    end_frame_count: params.endFrameCount,
+    video_input_mode: params.videoInputMode,
     reference_asset_ids: [],
     reference_run_file_ids: [],
     model_id: params.modelId,
@@ -505,9 +513,17 @@ export async function mutateHostedMockSnapshot(mutation: HostedStudioMutation) {
 
       const model = getStudioModelById(mutation.modelId);
       const persistedDraft: PersistedStudioDraft = {
-        ...createDraft(model),
+        ...toPersistedDraft(createDraft(model)),
         ...mutation.draft,
       };
+      const hydratedDraft = hydrateDraft(persistedDraft, model);
+      const requestMode = resolveStudioGenerationRequestMode(model, hydratedDraft);
+      const referenceCount =
+        "referenceCount" in mutation.draft ? mutation.draft.referenceCount : 0;
+      const startFrameCount =
+        "startFrameCount" in mutation.draft ? mutation.draft.startFrameCount : 0;
+      const endFrameCount =
+        "endFrameCount" in mutation.draft ? mutation.draft.endFrameCount : 0;
       const estimatedCredits = quoteStudioDraftCredits(model.id, persistedDraft);
       if (
         snapshot.creditBalance &&
@@ -526,7 +542,7 @@ export async function mutateHostedMockSnapshot(mutation: HostedStudioMutation) {
         modelName: model.name,
         kind: model.kind,
         provider: "fal",
-        requestMode: model.requestMode,
+        requestMode,
         status: "queued",
         prompt: persistedDraft.prompt,
         createdAt,
@@ -536,18 +552,25 @@ export async function mutateHostedMockSnapshot(mutation: HostedStudioMutation) {
         failedAt: null,
         cancelledAt: null,
         updatedAt: createdAt,
-        summary: createGenerationRunSummary(model, hydrateDraft(persistedDraft, model)),
+        summary: createGenerationRunSummary(model, hydratedDraft),
         outputAssetId: null,
-        previewUrl: createGenerationRunPreviewUrl(model, hydrateDraft(persistedDraft, model)),
+        previewUrl: createGenerationRunPreviewUrl(model, hydratedDraft),
         errorMessage: null,
         inputPayload: createHostedMutationInputPayload({
           modelId: model.id,
           prompt: persistedDraft.prompt,
-          requestMode: model.requestMode,
-          referenceCount:
-            "referenceCount" in mutation.draft ? mutation.draft.referenceCount : 0,
+          requestMode,
+          referenceCount,
+          startFrameCount,
+          endFrameCount,
+          videoInputMode: persistedDraft.videoInputMode,
         }),
-        inputSettings: persistedDraft,
+        inputSettings: {
+          ...persistedDraft,
+          start_frame_count: startFrameCount,
+          end_frame_count: endFrameCount,
+          video_input_mode: persistedDraft.videoInputMode,
+        },
         providerRequestId: null,
         providerStatus: "queued",
         estimatedCostUsd: null,
@@ -564,7 +587,9 @@ export async function mutateHostedMockSnapshot(mutation: HostedStudioMutation) {
         canCancel: true,
         draftSnapshot: {
           ...persistedDraft,
-          referenceCount: "referenceCount" in mutation.draft ? mutation.draft.referenceCount : 0,
+          referenceCount,
+          startFrameCount,
+          endFrameCount,
         },
       };
 

@@ -16,6 +16,7 @@ import {
   getStudioConcurrencyLimitForMode,
   getStudioRunCompletionDelayMs,
   quoteStudioDraftCredits,
+  resolveStudioGenerationRequestMode,
   shouldStudioMockRunFail,
 } from "./studio-generation-rules";
 import { reorderStudioFoldersByIds, sortStudioFoldersByOrder } from "./studio-folder-order";
@@ -80,6 +81,7 @@ import type {
   StudioProviderSaveResult,
   StudioProviderSettings,
   StudioRunFile,
+  StudioVideoInputMode,
   StudioWorkspaceSnapshot,
 } from "./types";
 
@@ -96,6 +98,20 @@ function createEmptyDraftReferenceMap() {
   return Object.fromEntries(
     STUDIO_MODEL_CATALOG.map((model) => [model.id, [] as DraftReference[]])
   ) as Record<string, DraftReference[]>;
+}
+
+type DraftFrameInputs = {
+  startFrame: DraftReference | null;
+  endFrame: DraftReference | null;
+};
+
+function createEmptyDraftFrameMap() {
+  return Object.fromEntries(
+    STUDIO_MODEL_CATALOG.map((model) => [
+      model.id,
+      { startFrame: null, endFrame: null } satisfies DraftFrameInputs,
+    ])
+  ) as Record<string, DraftFrameInputs>;
 }
 
 async function fetchHostedSnapshot(signal?: AbortSignal) {
@@ -251,6 +267,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   const dispatchTimersRef = useRef(new Map<string, number>());
   const completionTimersRef = useRef(new Map<string, number>());
   const draftReferencesRef = useRef(createEmptyDraftReferenceMap());
+  const draftFramesRef = useRef(createEmptyDraftFrameMap());
   const runsRef = useRef(seedSnapshot.generationRuns);
   const hostedModeSessionRef = useRef(0);
   const hostedLatestStartedRequestRef = useRef(0);
@@ -272,6 +289,9 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   const [draftsByModelId, setDraftsByModelId] = useState(seedSnapshot.draftsByModelId);
   const [draftReferencesByModelId, setDraftReferencesByModelId] = useState(
     createEmptyDraftReferenceMap
+  );
+  const [draftFramesByModelId, setDraftFramesByModelId] = useState(
+    createEmptyDraftFrameMap
   );
   const [gallerySizeLevel, setGallerySizeLevelState] = useState(
     seedSnapshot.gallerySizeLevel
@@ -359,6 +379,10 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     draftReferencesRef.current = draftReferencesByModelId;
   }, [draftReferencesByModelId]);
 
+  useEffect(() => {
+    draftFramesRef.current = draftFramesByModelId;
+  }, [draftFramesByModelId]);
+
   const clearAllTimers = useCallback(() => {
     for (const timerId of dispatchTimersRef.current.values()) {
       window.clearTimeout(timerId);
@@ -428,6 +452,15 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
         releaseDraftReferencePreview(reference);
       }
     }
+
+    for (const frameInputs of Object.values(draftFramesRef.current)) {
+      if (frameInputs.startFrame) {
+        releaseDraftReferencePreview(frameInputs.startFrame);
+      }
+      if (frameInputs.endFrame) {
+        releaseDraftReferencePreview(frameInputs.endFrame);
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -469,6 +502,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       setUploadDialogFolderId(null);
       setQueueLimitDialogOpen(false);
       setDraftReferencesByModelId(createEmptyDraftReferenceMap());
+      setDraftFramesByModelId(createEmptyDraftFrameMap());
     };
 
     resetUiState();
@@ -880,12 +914,17 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     const persistedDraft =
       draftsByModelId[selectedModel.id] ?? buildStudioDraftMap()[selectedModel.id];
     const references = draftReferencesByModelId[selectedModel.id] ?? [];
+    const frameInputs =
+      draftFramesByModelId[selectedModel.id] ??
+      ({ startFrame: null, endFrame: null } satisfies DraftFrameInputs);
 
     return {
       ...hydrateDraft(persistedDraft, selectedModel),
       references,
+      startFrame: frameInputs.startFrame,
+      endFrame: frameInputs.endFrame,
     } satisfies StudioDraft;
-  }, [draftReferencesByModelId, draftsByModelId, selectedModel]);
+  }, [draftFramesByModelId, draftReferencesByModelId, draftsByModelId, selectedModel]);
 
   const selectedFolder = useMemo(
     () => folders.find((folder) => folder.id === selectedFolderId) ?? null,
@@ -1080,6 +1119,85 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     [selectedModel.id]
   );
 
+  const replaceDraftFrameInputs = useCallback(
+    (
+      nextFramesOrUpdater:
+        | DraftFrameInputs
+        | ((currentFrames: DraftFrameInputs) => DraftFrameInputs)
+    ) => {
+      setDraftFramesByModelId((current) => {
+        const existingFrames =
+          current[selectedModel.id] ??
+          ({ startFrame: null, endFrame: null } satisfies DraftFrameInputs);
+        const nextFrames =
+          typeof nextFramesOrUpdater === "function"
+            ? nextFramesOrUpdater(existingFrames)
+            : nextFramesOrUpdater;
+
+        if (
+          existingFrames.startFrame &&
+          existingFrames.startFrame.id !== nextFrames.startFrame?.id
+        ) {
+          releaseDraftReferencePreview(existingFrames.startFrame);
+        }
+
+        if (
+          existingFrames.endFrame &&
+          existingFrames.endFrame.id !== nextFrames.endFrame?.id
+        ) {
+          releaseDraftReferencePreview(existingFrames.endFrame);
+        }
+
+        return {
+          ...current,
+          [selectedModel.id]: nextFrames,
+        };
+      });
+    },
+    [selectedModel.id]
+  );
+
+  const clearDraftFrameInputs = useCallback(() => {
+    replaceDraftFrameInputs({
+      startFrame: null,
+      endFrame: null,
+    });
+  }, [replaceDraftFrameInputs]);
+
+  const setVideoInputMode = useCallback(
+    (mode: StudioVideoInputMode) => {
+      updatePersistedDraft({ videoInputMode: mode });
+      replaceDraftReferences([]);
+      clearDraftFrameInputs();
+    },
+    [clearDraftFrameInputs, replaceDraftReferences, updatePersistedDraft]
+  );
+
+  const setFrameInput = useCallback(
+    (slot: "start" | "end", file: File) => {
+      const nextReference = createDraftReferenceFromFile(file);
+
+      updatePersistedDraft({ videoInputMode: "frames" });
+      replaceDraftReferences([]);
+      replaceDraftFrameInputs((currentFrames) => ({
+        startFrame:
+          slot === "start" ? nextReference : currentFrames.startFrame,
+        endFrame: slot === "end" ? nextReference : currentFrames.endFrame,
+      }));
+    },
+    [replaceDraftFrameInputs, replaceDraftReferences, updatePersistedDraft]
+  );
+
+  const clearFrameInput = useCallback(
+    (slot: "start" | "end") => {
+      replaceDraftFrameInputs((currentFrames) => ({
+        startFrame: slot === "start" ? null : currentFrames.startFrame,
+        endFrame: slot === "end" ? null : currentFrames.endFrame,
+      }));
+    },
+    [replaceDraftFrameInputs]
+  );
+
   const addDraftReferences = useCallback(
     (nextReferences: DraftReference[]) => {
       const mergedReferences = mergeDraftReferences(
@@ -1110,9 +1228,13 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   const addReferences = useCallback(
     (files: File[]) => {
       if (files.length === 0) return;
+      if (selectedModel.kind === "video" && selectedModel.supportsFrameInputs) {
+        updatePersistedDraft({ videoInputMode: "references" });
+        clearDraftFrameInputs();
+      }
       addDraftReferences(files.map(createDraftReferenceFromFile));
     },
-    [addDraftReferences]
+    [addDraftReferences, clearDraftFrameInputs, selectedModel.kind, selectedModel.supportsFrameInputs, updatePersistedDraft]
   );
 
   const removeReference = useCallback(
@@ -1135,6 +1257,26 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     [items]
   );
 
+  const setFrameFromLibraryItems = useCallback(
+    async (itemIds: string[], slot: "start" | "end") => {
+      const droppedItems = getItemsById(itemIds);
+      const imageItem = droppedItems.find((item) => item.kind === "image");
+
+      if (!imageItem) {
+        return `Only image assets can be used as a ${slot} frame.`;
+      }
+
+      const file = await resolveLibraryItemToReferenceFile(imageItem);
+      if (!file) {
+        return `Could not load that asset as a ${slot} frame.`;
+      }
+
+      setFrameInput(slot, file);
+      return null;
+    },
+    [getItemsById, setFrameInput]
+  );
+
   const getPromptBarDropHint = useCallback(
     (itemIds: string[]) => {
       const droppedItems = getItemsById(itemIds);
@@ -1146,6 +1288,14 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       const hasReferenceItems = droppedItems.some(isReferenceEligibleLibraryItem);
 
       if (hasTextItems && hasReferenceItems) {
+        if (
+          selectedModel.kind === "video" &&
+          selectedModel.supportsFrameInputs &&
+          currentDraft.videoInputMode === "frames"
+        ) {
+          return "Drop text here, and drop images onto Start or End frame";
+        }
+
         return selectedModel.supportsReferences
           ? "Drop to add references and prompt text"
           : "Drop to merge text into the prompt";
@@ -1158,6 +1308,14 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       }
 
       if (hasReferenceItems) {
+        if (
+          selectedModel.kind === "video" &&
+          selectedModel.supportsFrameInputs &&
+          currentDraft.videoInputMode === "frames"
+        ) {
+          return "Drop image assets onto Start or End frame";
+        }
+
         return selectedModel.supportsReferences
           ? droppedItems.length > 1
             ? "Drop to add as references"
@@ -1167,7 +1325,13 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
 
       return "Drop into prompt bar";
     },
-    [getItemsById, selectedModel.supportsReferences]
+    [
+      currentDraft.videoInputMode,
+      getItemsById,
+      selectedModel.kind,
+      selectedModel.supportsFrameInputs,
+      selectedModel.supportsReferences,
+    ]
   );
 
   const dropLibraryItemsIntoPromptBar = useCallback(
@@ -1188,7 +1352,14 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       }
 
       if (referenceItems.length > 0) {
-        if (!selectedModel.supportsReferences) {
+        const wantsFrameInputs =
+          selectedModel.kind === "video" &&
+          selectedModel.supportsFrameInputs &&
+          currentDraft.videoInputMode === "frames";
+
+        if (wantsFrameInputs) {
+          messages.push("Drop image assets onto Start or End frame.");
+        } else if (!selectedModel.supportsReferences) {
           messages.push("This model doesn't support references yet.");
         } else {
           const resolvedReferenceEntries = await Promise.all(
@@ -1236,7 +1407,10 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       currentDraft.prompt,
       getItemsById,
       maxReferenceFiles,
+      currentDraft.videoInputMode,
       selectedModel.supportsReferences,
+      selectedModel.kind,
+      selectedModel.supportsFrameInputs,
       updateDraft,
     ]
   );
@@ -1571,8 +1745,15 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       const nextModel = getStudioModelById(run.modelId);
       const nextVisibleModelId = getVisibleModelId(nextModel.id);
       const nextVisibleModel = getStudioModelById(nextVisibleModelId);
-      const { referenceCount, ...persistedRunDraft } = run.draftSnapshot;
+      const {
+        referenceCount,
+        startFrameCount,
+        endFrameCount,
+        ...persistedRunDraft
+      } = run.draftSnapshot;
       void referenceCount;
+      void startFrameCount;
+      void endFrameCount;
       const nextDraft = {
         ...(buildStudioDraftMap()[nextVisibleModel.id] ??
           toPersistedDraft(createDraft(nextVisibleModel))),
@@ -1596,6 +1777,24 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
         return {
           ...current,
           [nextVisibleModel.id]: [],
+        };
+      });
+      setDraftFramesByModelId((current) => {
+        const existingFrames =
+          current[nextVisibleModel.id] ??
+          ({ startFrame: null, endFrame: null } satisfies DraftFrameInputs);
+        if (existingFrames.startFrame) {
+          releaseDraftReferencePreview(existingFrames.startFrame);
+        }
+        if (existingFrames.endFrame) {
+          releaseDraftReferencePreview(existingFrames.endFrame);
+        }
+        return {
+          ...current,
+          [nextVisibleModel.id]: {
+            startFrame: null,
+            endFrame: null,
+          },
         };
       });
     },
@@ -1629,6 +1828,24 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
         return {
           ...current,
           [nextVisibleModelId]: [],
+        };
+      });
+      setDraftFramesByModelId((current) => {
+        const existingFrames =
+          current[nextVisibleModelId] ??
+          ({ startFrame: null, endFrame: null } satisfies DraftFrameInputs);
+        if (existingFrames.startFrame) {
+          releaseDraftReferencePreview(existingFrames.startFrame);
+        }
+        if (existingFrames.endFrame) {
+          releaseDraftReferencePreview(existingFrames.endFrame);
+        }
+        return {
+          ...current,
+          [nextVisibleModelId]: {
+            startFrame: null,
+            endFrame: null,
+          },
         };
       });
     },
@@ -2010,6 +2227,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     }
 
     const estimatedCredits = quoteStudioDraftCredits(selectedModel.id, currentDraft);
+    const requestMode = resolveStudioGenerationRequestMode(selectedModel, currentDraft);
 
     const createdAt = new Date().toISOString();
     const runId = createStudioId("run");
@@ -2022,7 +2240,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       modelName: selectedModel.name,
       kind: selectedModel.kind,
       provider: "fal",
-      requestMode: selectedModel.requestMode,
+      requestMode,
       status: "queued",
       prompt: currentDraft.prompt,
       createdAt,
@@ -2040,9 +2258,13 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
         prompt: currentDraft.prompt,
         negative_prompt: currentDraft.negativePrompt,
         reference_count: currentDraft.references.length,
-        request_mode: selectedModel.requestMode,
+        start_frame_count: currentDraft.startFrame ? 1 : 0,
+        end_frame_count: currentDraft.endFrame ? 1 : 0,
+        video_input_mode: currentDraft.videoInputMode,
+        request_mode: requestMode,
       },
       inputSettings: {
+        video_input_mode: currentDraft.videoInputMode,
         aspect_ratio: currentDraft.aspectRatio,
         resolution: currentDraft.resolution,
         output_format: currentDraft.outputFormat,
@@ -2055,6 +2277,8 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
         voice: currentDraft.voice,
         language: currentDraft.language,
         speaking_rate: currentDraft.speakingRate,
+        start_frame_count: currentDraft.startFrame ? 1 : 0,
+        end_frame_count: currentDraft.endFrame ? 1 : 0,
       },
       providerRequestId: null,
       providerStatus: "queued",
@@ -2148,11 +2372,20 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     selectedModel,
     selectedModelId: visibleSelectedModelId,
     selectionModeEnabled,
+    setEndFrame: (file: File) => setFrameInput("end", file),
     setGallerySizeLevel,
     setProviderSettingsOpen,
     setSelectedFolderId,
     setSelectedModelId,
+    setStartFrame: (file: File) => setFrameInput("start", file),
     setUploadDialogFolder,
+    setVideoInputMode,
+    clearEndFrame: () => clearFrameInput("end"),
+    clearStartFrame: () => clearFrameInput("start"),
+    dropLibraryItemsIntoEndFrame: (itemIds: string[]) =>
+      setFrameFromLibraryItems(itemIds, "end"),
+    dropLibraryItemsIntoStartFrame: (itemIds: string[]) =>
+      setFrameFromLibraryItems(itemIds, "start"),
     toggleItemSelection,
     toggleSelectionMode,
     ungroupedItems,

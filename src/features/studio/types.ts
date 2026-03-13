@@ -14,6 +14,9 @@ export type StudioAssetStatus = "ready" | "processing" | "failed";
 export type StudioGenerationRequestMode =
   | "text-to-image"
   | "text-to-video"
+  | "image-to-video"
+  | "first-last-frame-to-video"
+  | "reference-to-video"
   | "text-to-speech"
   | "background-removal"
   | "chat";
@@ -29,6 +32,7 @@ export type LibraryItemRole =
 export type DraftReferenceSource = "upload" | "library-item";
 export type DraftReferencePreviewSource = "owned" | "asset" | "none";
 export type StudioFolderEditorMode = "create" | "rename";
+export type StudioVideoInputMode = "frames" | "references";
 export type StudioProviderConnectionStatus =
   | "idle"
   | "connected"
@@ -49,6 +53,8 @@ export interface StudioModelDefinition {
   promptPlaceholder: string;
   supportsNegativePrompt: boolean;
   supportsReferences: boolean;
+  supportsFrameInputs?: boolean;
+  supportsEndFrame?: boolean;
   minimumReferenceFiles?: number;
   maxReferenceFiles?: number;
   acceptedReferenceKinds?: StudioReferenceInputKind[];
@@ -62,7 +68,7 @@ export interface StudioModelDefinition {
   durationOptions?: number[];
   toneOptions?: string[];
   maxTokenOptions?: number[];
-  defaultDraft: Omit<StudioDraft, "references">;
+  defaultDraft: Omit<StudioDraft, "references" | "startFrame" | "endFrame">;
 }
 
 export interface DraftReference {
@@ -80,6 +86,7 @@ export interface DraftReference {
 export interface StudioDraft {
   prompt: string;
   negativePrompt: string;
+  videoInputMode: StudioVideoInputMode;
   aspectRatio: string;
   resolution: string;
   outputFormat: string;
@@ -93,9 +100,14 @@ export interface StudioDraft {
   language: string;
   speakingRate: string;
   references: DraftReference[];
+  startFrame: DraftReference | null;
+  endFrame: DraftReference | null;
 }
 
-export type PersistedStudioDraft = Omit<StudioDraft, "references">;
+export type PersistedStudioDraft = Omit<
+  StudioDraft,
+  "references" | "startFrame" | "endFrame"
+>;
 
 export interface StudioFolder {
   id: string;
@@ -210,6 +222,8 @@ export interface GenerationRun {
   canCancel: boolean;
   draftSnapshot: PersistedStudioDraft & {
     referenceCount: number;
+    startFrameCount: number;
+    endFrameCount: number;
   };
 }
 

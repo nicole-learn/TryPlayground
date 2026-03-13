@@ -317,10 +317,17 @@ export function StudioPage({
             sections={studio.modelSections}
             selectedModelId={studio.selectedModelId}
             onAddReferences={studio.addReferences}
+            onClearEndFrame={studio.clearEndFrame}
+            onClearStartFrame={studio.clearStartFrame}
             onDropLibraryItems={studio.dropLibraryItemsIntoPromptBar}
+            onDropLibraryItemsToEndFrame={studio.dropLibraryItemsIntoEndFrame}
+            onDropLibraryItemsToStartFrame={studio.dropLibraryItemsIntoStartFrame}
             onGenerate={studio.generate}
             onRemoveReference={studio.removeReference}
             onSelectModel={studio.setSelectedModelId}
+            onSetEndFrame={studio.setEndFrame}
+            onSetStartFrame={studio.setStartFrame}
+            onSetVideoInputMode={studio.setVideoInputMode}
             onUpdateDraft={studio.updateDraft}
           />
         }

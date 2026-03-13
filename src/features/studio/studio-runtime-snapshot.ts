@@ -87,7 +87,7 @@ export function buildStudioWorkspaceSnapshot(
   params: BuildStudioWorkspaceSnapshotParams
 ) {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     mode: params.appMode,
     profile: params.profile,
     providerSettings: params.providerSettings,

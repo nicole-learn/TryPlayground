@@ -34,6 +34,7 @@ export const STUDIO_MODEL_CATALOG: StudioModelDefinition[] = [
     defaultDraft: {
       prompt: "",
       negativePrompt: "",
+      videoInputMode: "references",
       aspectRatio: "1:1",
       resolution: "1K",
       outputFormat: "png",
@@ -62,6 +63,8 @@ export const STUDIO_MODEL_CATALOG: StudioModelDefinition[] = [
     promptPlaceholder: "Describe the video you want to generate...",
     supportsNegativePrompt: true,
     supportsReferences: true,
+    supportsFrameInputs: true,
+    supportsEndFrame: true,
     maxReferenceFiles: 3,
     acceptedReferenceKinds: ["image"],
     aspectRatioOptions: ["16:9", "9:16"],
@@ -70,6 +73,7 @@ export const STUDIO_MODEL_CATALOG: StudioModelDefinition[] = [
     defaultDraft: {
       prompt: "",
       negativePrompt: "",
+      videoInputMode: "frames",
       aspectRatio: "16:9",
       resolution: "1080p",
       outputFormat: "mp4",
@@ -103,6 +107,7 @@ export const STUDIO_MODEL_CATALOG: StudioModelDefinition[] = [
     defaultDraft: {
       prompt: "",
       negativePrompt: "",
+      videoInputMode: "references",
       aspectRatio: "1:1",
       resolution: "",
       outputFormat: "text",
@@ -137,6 +142,7 @@ export const STUDIO_MODEL_CATALOG: StudioModelDefinition[] = [
     defaultDraft: {
       prompt: "",
       negativePrompt: "",
+      videoInputMode: "references",
       aspectRatio: "",
       resolution: "",
       outputFormat: "mp3",
@@ -181,6 +187,7 @@ export const STUDIO_MODEL_CATALOG: StudioModelDefinition[] = [
     defaultDraft: {
       prompt: "",
       negativePrompt: "",
+      videoInputMode: "references",
       aspectRatio: "",
       resolution: "",
       outputFormat: "wav",
@@ -216,6 +223,7 @@ export const STUDIO_MODEL_CATALOG: StudioModelDefinition[] = [
     defaultDraft: {
       prompt: "",
       negativePrompt: "",
+      videoInputMode: "references",
       aspectRatio: "",
       resolution: "",
       outputFormat: "mp3",
@@ -253,6 +261,7 @@ export const STUDIO_MODEL_CATALOG: StudioModelDefinition[] = [
     defaultDraft: {
       prompt: "",
       negativePrompt: "",
+      videoInputMode: "references",
       aspectRatio: "",
       resolution: "",
       outputFormat: "png",

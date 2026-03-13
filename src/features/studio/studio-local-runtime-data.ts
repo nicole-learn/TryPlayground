@@ -1,4 +1,5 @@
 import type { StudioAppMode } from "./studio-app-mode";
+import { resolveStudioGenerationRequestMode } from "./studio-generation-rules";
 import {
   STUDIO_MODEL_CATALOG,
   getStudioModelById,
@@ -32,7 +33,7 @@ export const LOCAL_STUDIO_WORKSPACE_ID = "workspace-local";
 export const HOSTED_STUDIO_WORKSPACE_ID = "workspace-hosted";
 export const LOCAL_STUDIO_USER_ID = "user-local";
 export const HOSTED_STUDIO_USER_ID = "user-hosted";
-export const STUDIO_STATE_SCHEMA_VERSION = 3;
+export const STUDIO_STATE_SCHEMA_VERSION = 4;
 
 const MOCK_MEDIA = {
   generatedImage: {
@@ -161,6 +162,8 @@ export function createDraft(model: StudioModelDefinition): StudioDraft {
   return {
     ...model.defaultDraft,
     references: [],
+    startFrame: null,
+    endFrame: null,
   };
 }
 
@@ -168,6 +171,7 @@ export function toPersistedDraft(draft: StudioDraft): PersistedStudioDraft {
   return {
     prompt: draft.prompt,
     negativePrompt: draft.negativePrompt,
+    videoInputMode: draft.videoInputMode,
     aspectRatio: draft.aspectRatio,
     resolution: draft.resolution,
     outputFormat: draft.outputFormat,
@@ -198,6 +202,8 @@ export function createDraftSnapshot(
   return {
     ...toPersistedDraft(draft),
     referenceCount: draft.references.length,
+    startFrameCount: draft.startFrame ? 1 : 0,
+    endFrameCount: draft.endFrame ? 1 : 0,
   };
 }
 
@@ -672,7 +678,18 @@ export function createGenerationRunSummary(
   }
 
   if (model.kind === "video") {
-    return `${draft.durationSeconds}s • ${draft.aspectRatio} • ${draft.resolution}`;
+    const requestMode = resolveStudioGenerationRequestMode(model, draft);
+    const inputModeLabel =
+      requestMode === "first-last-frame-to-video"
+        ? "Frames"
+        : requestMode === "image-to-video"
+          ? draft.videoInputMode === "frames"
+            ? "Start frame"
+            : "Reference"
+          : requestMode === "reference-to-video"
+            ? "References"
+            : "Text";
+    return `${inputModeLabel} • ${draft.durationSeconds}s • ${draft.resolution}`;
   }
 
   return `${draft.tone} • ${draft.maxTokens} max tokens`;
@@ -840,8 +857,7 @@ function createMockGenerationRun(params: {
   status: GenerationRun["status"];
   outputAssetId?: string | null;
 }) {
-  const requestMode =
-    params.model.requestMode;
+  const requestMode = resolveStudioGenerationRequestMode(params.model, params.draft);
 
   return {
     id: params.id,
@@ -872,9 +888,13 @@ function createMockGenerationRun(params: {
     inputPayload: {
       prompt: params.draft.prompt,
       reference_count: params.draft.references.length,
+      start_frame_count: params.draft.startFrame ? 1 : 0,
+      end_frame_count: params.draft.endFrame ? 1 : 0,
+      video_input_mode: params.draft.videoInputMode,
       request_mode: requestMode,
     },
     inputSettings: {
+      video_input_mode: params.draft.videoInputMode,
       aspect_ratio: params.draft.aspectRatio,
       resolution: params.draft.resolution,
       output_format: params.draft.outputFormat,
@@ -887,6 +907,8 @@ function createMockGenerationRun(params: {
       voice: params.draft.voice,
       language: params.draft.language,
       speaking_rate: params.draft.speakingRate,
+      start_frame_count: params.draft.startFrame ? 1 : 0,
+      end_frame_count: params.draft.endFrame ? 1 : 0,
     },
     providerRequestId:
       params.status === "queued" || params.status === "pending"
