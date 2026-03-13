@@ -36,7 +36,7 @@ function ActionPillButton({
       aria-label={ariaLabel}
       title={ariaLabel}
       className={cn(
-        "inline-flex h-11 items-center gap-2 rounded-full border px-4 text-[15px] font-medium tracking-tight transition-all duration-150 active:scale-[0.98]",
+        "inline-flex h-10 items-center gap-2 rounded-full border px-3.5 text-[14px] font-medium tracking-tight transition-all duration-150 active:scale-[0.98]",
         active
           ? "border-primary/40 bg-primary/16 text-primary"
           : "border-white/10 bg-white/[0.03] text-foreground/92 hover:bg-white/[0.06]"
@@ -63,7 +63,7 @@ export function StudioTopBar({
 
   return (
     <header className="flex h-full items-center gap-3 border-b border-white/8 bg-black px-3">
-      <div className="flex min-w-0 flex-1 items-center gap-2">
+      <div className="flex min-w-0 flex-1 items-center gap-1.5">
         {selectedItemCount > 0 ? (
           <ActionPillButton ariaLabel="Delete selected" onClick={onDeleteSelected}>
             <Trash2 className="size-4 text-red-300" />
@@ -91,7 +91,7 @@ export function StudioTopBar({
         </ActionPillButton>
       </div>
 
-      <div className="ml-auto flex shrink-0 items-center gap-3">
+      <div className="ml-auto flex shrink-0 items-center gap-2.5">
         <input
           type="range"
           min={0}
@@ -99,7 +99,7 @@ export function StudioTopBar({
           step={1}
           value={sizeLevel}
           onChange={(event) => onSizeLevelChange(Number(event.target.value))}
-          className="studio-range w-[160px]"
+          className="studio-range w-[150px]"
           aria-label="Gallery size"
           style={{
             background: `linear-gradient(90deg, color-mix(in srgb, var(--primary) 90%, white 10%) 0%, color-mix(in srgb, var(--primary) 90%, white 10%) ${sliderProgressPct}%, rgba(255,255,255,0.12) ${sliderProgressPct}%, rgba(255,255,255,0.12) 100%)`,

@@ -15,7 +15,7 @@ interface StudioWorkspaceShellProps {
   topBar: ReactNode;
 }
 
-const DESKTOP_TOP_BAR_HEIGHT = 72;
+const DESKTOP_TOP_BAR_HEIGHT = 60;
 const DESKTOP_RIGHT_SIDEBAR_WIDTH = 220;
 const DEFAULT_PRIMARY_WIDTH = 64;
 const MIN_PRIMARY_WIDTH = 34;
@@ -131,14 +131,16 @@ export function StudioWorkspaceShell({
           {topBar}
         </div>
         <div className="min-h-0 min-w-0 flex-1">
-          <div className="relative h-full min-h-0 min-w-0">
+          <div className="h-full min-h-0 min-w-0">
             <div className="flex h-full min-h-0 min-w-0 overflow-hidden">
-              <div className="min-h-0 min-w-0 flex-1">
+              <div className="relative min-h-0 min-w-0 flex-1">
                 <DesktopSplitPanels
                   onCloseSecondary={onCloseSecondary}
                   primaryPanel={primaryPanel}
                   secondaryPanel={secondaryPanel}
                 />
+
+                <div className="relative z-[120]">{floatingOverlay}</div>
               </div>
 
               <aside
@@ -148,8 +150,6 @@ export function StudioWorkspaceShell({
                 <div className="min-h-0 h-full">{rightSidebar}</div>
               </aside>
             </div>
-
-            <div className="relative z-[120]">{floatingOverlay}</div>
           </div>
         </div>
       </div>

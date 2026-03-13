@@ -15,7 +15,7 @@ export function StudioAccountButton({
       onClick={onClick}
       aria-label="Provider settings"
       title="Provider settings"
-      className="relative flex size-[42px] shrink-0 items-center justify-center rounded-full border border-white/10 bg-[color-mix(in_oklch,var(--primary)_25%,black)] text-sm font-semibold text-primary-foreground transition-all duration-150 hover:brightness-110 active:scale-[0.97]"
+      className="relative flex size-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-[color-mix(in_oklch,var(--primary)_25%,black)] text-sm font-semibold text-primary-foreground transition-all duration-150 hover:brightness-110 active:scale-[0.97]"
     >
       <span>V</span>
       <span
