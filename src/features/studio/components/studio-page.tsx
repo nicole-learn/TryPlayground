@@ -139,6 +139,10 @@ export function StudioPage({
     () => studio.items.find((item) => item.id === activeItemId) ?? null,
     [activeItemId, studio.items]
   );
+  const selectedItems = useMemo(
+    () => studio.items.filter((item) => studio.selectedItemIdSet.has(item.id)),
+    [studio.items, studio.selectedItemIdSet]
+  );
   const folderDeleteTarget = useMemo(
     () =>
       studio.folders.find((folder) => folder.id === folderDeleteTargetId) ?? null,
@@ -171,6 +175,10 @@ export function StudioPage({
   const downloadFolder = (folderId: string) => {
     const folderItems = studio.items.filter((item) => item.folderId === folderId);
     downloadFolderItems(folderItems);
+  };
+
+  const downloadSelectedItems = () => {
+    downloadFolderItems(selectedItems);
   };
 
   const copyFolderId = async (folderId: string) => {
@@ -344,7 +352,9 @@ export function StudioPage({
           <StudioTopBar
             appMode={appMode}
             hasFalKey={studio.hasFalKey}
+            onClearSelection={studio.clearSelection}
             onDeleteSelected={studio.deleteSelectedItems}
+            onDownloadSelected={downloadSelectedItems}
             onOpenCreateText={studio.openCreateTextComposer}
             onOpenAccount={openAccountSurface}
             onOpenUpload={() => fileInputRef.current?.click()}

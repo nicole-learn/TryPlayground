@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { FileText, SquareMousePointer, Trash2, Upload } from "lucide-react";
+import { Download, FileText, SquareMousePointer, Trash2, Upload, X } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/cn";
 import type { StudioAppMode } from "../studio-app-mode";
@@ -10,7 +10,9 @@ import { StudioAccountButton } from "./studio-account-button";
 interface StudioTopBarProps {
   appMode: StudioAppMode;
   hasFalKey: boolean;
+  onClearSelection: () => void;
   onDeleteSelected: () => void;
+  onDownloadSelected: () => void;
   onOpenCreateText: () => void;
   onOpenAccount: () => void;
   onOpenUpload: () => void;
@@ -56,7 +58,9 @@ function ActionPillButton({
 export function StudioTopBar({
   appMode,
   hasFalKey,
+  onClearSelection,
   onDeleteSelected,
+  onDownloadSelected,
   onOpenCreateText,
   onOpenAccount,
   onOpenUpload,
@@ -67,7 +71,7 @@ export function StudioTopBar({
   onSizeLevelChange,
 }: StudioTopBarProps) {
   return (
-    <header className="flex h-full items-center gap-3 border-b border-white/8 bg-black px-3">
+    <header className="relative flex h-full items-center gap-3 border-b border-white/8 bg-black px-3">
       <div className="flex min-w-0 flex-1 items-center">
         <div className="flex min-w-0 items-center gap-2.5">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -84,18 +88,42 @@ export function StudioTopBar({
         </div>
       </div>
 
-      <div className="ml-auto flex shrink-0 items-center gap-1.5">
-        {selectedItemCount > 0 ? (
-          <ActionPillButton
-            ariaLabel="Delete selected"
-            className="min-w-[112px] border-red-500/28 bg-red-500/14 text-red-100 hover:bg-red-500/22"
-            onClick={onDeleteSelected}
-          >
-            <Trash2 className="size-3.5 text-red-300" />
-            <span>{`Delete ${selectedItemCount}`}</span>
-          </ActionPillButton>
-        ) : null}
+      {selectedItemCount > 0 ? (
+        <div className="pointer-events-none absolute inset-y-0 left-1/2 z-10 hidden -translate-x-1/2 items-center xl:flex">
+          <div className="pointer-events-auto flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClearSelection}
+              aria-label="Clear selected assets"
+              title="Clear selected assets"
+              className="inline-flex h-9 items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 text-[13px] font-medium text-foreground transition-all duration-150 hover:bg-white/[0.06] active:scale-[0.98]"
+            >
+              <X className="size-3.5" />
+              <span>{`${selectedItemCount} selected`}</span>
+            </button>
 
+            <ActionPillButton
+              ariaLabel="Download selected"
+              className="min-w-[108px] border-primary/35 bg-primary text-primary-foreground hover:bg-primary/92"
+              onClick={onDownloadSelected}
+            >
+              <Download className="size-3.5" />
+              <span>Download</span>
+            </ActionPillButton>
+
+            <ActionPillButton
+              ariaLabel="Delete selected"
+              className="min-w-[96px] border-red-500/28 bg-red-500/90 text-white hover:bg-red-500"
+              onClick={onDeleteSelected}
+            >
+              <Trash2 className="size-3.5" />
+              <span>Delete</span>
+            </ActionPillButton>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="ml-auto flex shrink-0 items-center gap-1.5">
         <ActionPillButton
           active={selectionModeEnabled}
           ariaLabel="Selection mode"
