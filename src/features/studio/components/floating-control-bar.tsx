@@ -2,7 +2,6 @@
 
 import {
   AudioLines,
-  ChevronRight,
   FileText,
   Image as ImageIcon,
   Plus,
@@ -10,7 +9,7 @@ import {
   Video,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import type { StudioDraft, StudioModelDefinition, StudioModelSection } from "../types";
 
@@ -222,7 +221,6 @@ export function FloatingControlBar({
   onSelectModel,
   onUpdateDraft,
 }: FloatingControlBarProps) {
-  const [collapsed, setCollapsed] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const canGenerate = draft.prompt.trim().length > 0 && hasFalKey;
 
@@ -373,102 +371,81 @@ export function FloatingControlBar({
 
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-5 z-40 flex justify-center px-6">
-      <div className="relative w-full max-w-6xl">
-        {!collapsed ? (
-          <div className="pointer-events-auto">
-            <div
-              style={{
-                backgroundImage:
-                  "linear-gradient(170deg, oklch(0.14 0.006 200 / 0.5) 0%, oklch(0.23 0.004 220 / 0.5) 70%, oklch(0.29 0.012 195 / 0.5) 100%)",
-              }}
-              className="relative flex min-w-0 flex-1 flex-col rounded-2xl border border-white/[0.08] bg-card/90 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] backdrop-blur-2xl"
-            >
-              <div className="flex items-stretch">
-                <div className="flex min-w-0 flex-1 flex-col">
-                  {draft.references.length > 0 ? (
-                    <div className="flex items-center gap-2 px-4 pt-3 pb-1">
-                      {draft.references.map((reference) => (
-                        <ReferenceThumbnail
-                          key={reference.id}
-                          file={reference.file}
-                          onRemove={() => onRemoveReference(reference.id)}
-                        />
-                      ))}
-                      <AddReferenceButton large onAdd={onAddReferences} />
-                    </div>
-                  ) : null}
-
-                  <div className="flex items-start">
-                    {model.supportsReferences && draft.references.length === 0 ? (
-                      <div className="flex shrink-0 items-center pl-4 pt-3.5">
-                        <AddReferenceButton onAdd={onAddReferences} />
-                      </div>
-                    ) : null}
-
-                    <div className="min-w-0 flex-1 px-3 py-3">
-                      <textarea
-                        ref={promptRef}
-                        value={draft.prompt}
-                        onChange={(event) => onUpdateDraft({ prompt: event.target.value })}
-                        placeholder={model.promptPlaceholder}
-                        className="min-h-[1.5rem] max-h-80 w-full resize-none overflow-y-auto border-0 bg-transparent px-2 py-1 text-sm leading-5 text-foreground shadow-none outline-none"
-                        rows={1}
-                      />
-                    </div>
-                  </div>
-
-                  {settingPills.length > 0 ? (
-                    <div className="flex flex-wrap items-center gap-1.5 px-4 pb-3">
-                      {settingPills}
-                    </div>
-                  ) : null}
+      <div className="pointer-events-auto w-full max-w-6xl">
+        <div
+          style={{
+            backgroundImage:
+              "linear-gradient(170deg, oklch(0.14 0.006 200 / 0.5) 0%, oklch(0.23 0.004 220 / 0.5) 70%, oklch(0.29 0.012 195 / 0.5) 100%)",
+          }}
+          className="relative flex min-w-0 flex-1 flex-col rounded-2xl border border-white/[0.08] bg-card/90 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] backdrop-blur-2xl"
+        >
+          <div className="flex items-stretch">
+            <div className="flex min-w-0 flex-1 flex-col">
+              {draft.references.length > 0 ? (
+                <div className="flex items-center gap-2 px-4 pt-3 pb-1">
+                  {draft.references.map((reference) => (
+                    <ReferenceThumbnail
+                      key={reference.id}
+                      file={reference.file}
+                      onRemove={() => onRemoveReference(reference.id)}
+                    />
+                  ))}
+                  <AddReferenceButton large onAdd={onAddReferences} />
                 </div>
+              ) : null}
 
-                <div className="flex shrink-0 items-end gap-2 p-3">
-                  {!hasFalKey ? (
-                    <div className="max-w-44 self-center text-right text-xs text-amber-300/90">
-                      Add your Fal key to generate.
-                    </div>
-                  ) : null}
+              <div className="flex items-start">
+                {model.supportsReferences && draft.references.length === 0 ? (
+                  <div className="flex shrink-0 items-center pl-4 pt-3.5">
+                    <AddReferenceButton onAdd={onAddReferences} />
+                  </div>
+                ) : null}
 
-                  <button
-                    type="button"
-                    disabled={!canGenerate}
-                    onClick={onGenerate}
-                    style={{
-                      background:
-                        "linear-gradient(to bottom, oklch(0.82 0.10 190), oklch(0.65 0.11 190))",
-                    }}
-                    className="flex h-[70px] items-center gap-2 rounded-xl px-5 text-base font-semibold tracking-tight text-primary-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] transition-[filter,opacity] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:brightness-100"
-                  >
-                    <span>Generate</span>
-                    <span className="inline-flex items-center gap-1 text-base">
-                      <Sparkles className="size-4" />
-                      <span>Fal</span>
-                    </span>
-                  </button>
+                <div className="min-w-0 flex-1 px-3 py-3">
+                  <textarea
+                    ref={promptRef}
+                    value={draft.prompt}
+                    onChange={(event) => onUpdateDraft({ prompt: event.target.value })}
+                    placeholder={model.promptPlaceholder}
+                    className="min-h-[1.5rem] max-h-80 w-full resize-none overflow-y-auto border-0 bg-transparent px-2 py-1 text-sm leading-5 text-foreground shadow-none outline-none"
+                    rows={1}
+                  />
                 </div>
               </div>
+
+              {settingPills.length > 0 ? (
+                <div className="flex flex-wrap items-center gap-1.5 px-4 pb-3">
+                  {settingPills}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex shrink-0 items-end gap-2 p-3">
+              {!hasFalKey ? (
+                <div className="max-w-44 self-center text-right text-xs text-amber-300/90">
+                  Add your Fal key to generate.
+                </div>
+              ) : null}
+
+              <button
+                type="button"
+                disabled={!canGenerate}
+                onClick={onGenerate}
+                style={{
+                  background:
+                    "linear-gradient(to bottom, oklch(0.82 0.10 190), oklch(0.65 0.11 190))",
+                }}
+                className="flex h-[70px] items-center gap-2 rounded-xl px-5 text-base font-semibold tracking-tight text-primary-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] transition-[filter,opacity] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:brightness-100"
+              >
+                <span>Generate</span>
+                <span className="inline-flex items-center gap-1 text-base">
+                  <Sparkles className="size-4" />
+                  <span>Fal</span>
+                </span>
+              </button>
             </div>
           </div>
-        ) : null}
-
-        <button
-          type="button"
-          onClick={() => setCollapsed((current) => !current)}
-          className={cn(
-            "pointer-events-auto absolute bottom-4 z-10 flex items-center justify-center rounded-full bg-secondary text-secondary-foreground transition-[width,height,right,box-shadow,transform,filter,background-color] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:scale-105 hover:brightness-110 hover:shadow-[0_0_12px_3px_color-mix(in_oklch,var(--secondary)_20%,transparent),0_4px_14px_rgba(0,0,0,0.25)] active:scale-95 active:bg-[oklch(0.55_0.18_258)]",
-            collapsed ? "right-[-5.5rem] size-20 shadow-lg" : "right-[-5rem] size-14"
-          )}
-          aria-label={collapsed ? "Expand prompt bar" : "Minimize prompt bar"}
-          title={collapsed ? "Expand prompt bar" : "Minimize prompt bar"}
-        >
-          {collapsed ? (
-            <Sparkles className="size-8" />
-          ) : (
-            <ChevronRight className="size-7" />
-          )}
-        </button>
+        </div>
       </div>
     </div>
   );
