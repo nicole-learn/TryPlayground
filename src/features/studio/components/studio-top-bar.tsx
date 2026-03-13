@@ -36,7 +36,7 @@ function ActionPillButton({
       aria-label={ariaLabel}
       title={ariaLabel}
       className={cn(
-        "inline-flex h-10 items-center gap-2 rounded-full border px-3.5 text-[14px] font-medium tracking-tight transition-all duration-150 active:scale-[0.98]",
+        "inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-[13px] font-medium tracking-tight transition-all duration-150 active:scale-[0.98]",
         active
           ? "border-primary/40 bg-primary/16 text-primary"
           : "border-white/10 bg-white/[0.03] text-foreground/92 hover:bg-white/[0.06]"
@@ -66,7 +66,7 @@ export function StudioTopBar({
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
         {selectedItemCount > 0 ? (
           <ActionPillButton ariaLabel="Delete selected" onClick={onDeleteSelected}>
-            <Trash2 className="size-4 text-red-300" />
+            <Trash2 className="size-3.5 text-red-300" />
             <span className="text-red-200">Delete {selectedItemCount}</span>
           </ActionPillButton>
         ) : null}
@@ -76,17 +76,17 @@ export function StudioTopBar({
           ariaLabel="Selection mode"
           onClick={onToggleSelectionMode}
         >
-          <SquareMousePointer className="size-4" />
+          <SquareMousePointer className="size-3.5" />
           <span>Selection Mode</span>
         </ActionPillButton>
 
         <ActionPillButton ariaLabel="Add prompt" onClick={onOpenCreateText}>
-          <FileText className="size-4" />
+          <FileText className="size-3.5" />
           <span>Add Prompt</span>
         </ActionPillButton>
 
         <ActionPillButton ariaLabel="Upload files" onClick={onOpenUpload}>
-          <Upload className="size-4" />
+          <Upload className="size-3.5" />
           <span>Upload Files</span>
         </ActionPillButton>
       </div>
