@@ -1,115 +1,218 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AssetDetailDialog } from "./asset-detail-dialog";
 import { CreateTextDialog } from "./create-text-dialog";
-import { FolderDialog } from "./folder-dialog";
 import { FloatingControlBar } from "./floating-control-bar";
-import { LocalSettingsDialog } from "./local-settings-dialog";
+import { FolderDialog } from "./folder-dialog";
 import { FolderSidebar } from "./folder-sidebar";
+import { LocalSettingsDialog } from "./local-settings-dialog";
 import { StudioGallery } from "./studio-gallery";
+import { StudioMobileRail } from "./studio-mobile-rail";
 import { StudioTopBar } from "./studio-top-bar";
 import { StudioWorkspaceShell } from "./studio-workspace-shell";
 import { useStudioApp } from "../use-studio-app";
+import type { LibraryItem } from "../types";
+
+const XL_BREAKPOINT_QUERY = "(min-width: 1280px)";
+
+function getDownloadFileName(item: LibraryItem) {
+  const safeBaseName = item.title.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-") || "asset";
+
+  if (item.kind === "text") {
+    return `${safeBaseName}.txt`;
+  }
+
+  if (item.kind === "video") {
+    return `${safeBaseName}.mp4`;
+  }
+
+  if (item.kind === "image") {
+    return `${safeBaseName}.png`;
+  }
+
+  return safeBaseName;
+}
 
 export function StudioPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const studio = useStudioApp();
+  const [isDesktopViewport, setIsDesktopViewport] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return window.matchMedia(XL_BREAKPOINT_QUERY).matches;
+  });
+  const [activeItemId, setActiveItemId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia(XL_BREAKPOINT_QUERY);
+    const syncViewport = () => {
+      setIsDesktopViewport(mediaQuery.matches);
+    };
+
+    syncViewport();
+    mediaQuery.addEventListener("change", syncViewport);
+    return () => mediaQuery.removeEventListener("change", syncViewport);
+  }, []);
+
+  const activeItem = useMemo(
+    () => studio.items.find((item) => item.id === activeItemId) ?? null,
+    [activeItemId, studio.items]
+  );
+
+  const downloadItem = (item: LibraryItem) => {
+    if (typeof window === "undefined") return;
+
+    if (item.kind === "text") {
+      const blob = new Blob([item.contentText || item.prompt || item.title], {
+        type: "text/plain;charset=utf-8",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = getDownloadFileName(item);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      return;
+    }
+
+    if (!item.previewUrl) return;
+
+    const link = document.createElement("a");
+    link.href = item.previewUrl;
+    link.download = getDownloadFileName(item);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+
+  const primaryGallery = (
+    <StudioGallery
+      allowDropMove={Boolean(studio.selectedFolderId)}
+      emptyStateActionLabel="Upload Assets"
+      emptyStateLabel="Generate or Upload an asset to get started"
+      items={studio.ungroupedItems}
+      pendingRuns={studio.pendingRuns}
+      selectedItemIdSet={studio.selectedItemIdSet}
+      selectionModeEnabled={studio.selectionModeEnabled}
+      sizeLevel={studio.gallerySizeLevel}
+      onDeleteItem={(itemId) => {
+        if (activeItemId === itemId) {
+          setActiveItemId(null);
+        }
+        studio.deleteItem(itemId);
+      }}
+      onEmptyStateAction={() => fileInputRef.current?.click()}
+      onMoveDraggedItems={(itemIds) => studio.moveItemsToFolder(itemIds, null)}
+      onOpenItem={setActiveItemId}
+      onReuseItem={studio.reuseItem}
+      onToggleItemSelection={studio.toggleItemSelection}
+    />
+  );
+
+  const secondaryGallery = studio.selectedFolder ? (
+    <StudioGallery
+      allowDropMove
+      emptyStateActionLabel="Upload Assets"
+      emptyStateLabel="Drag or Upload an asset into this folder to see it here"
+      items={studio.selectedFolderItems}
+      selectedItemIdSet={studio.selectedItemIdSet}
+      selectionModeEnabled={studio.selectionModeEnabled}
+      sizeLevel={studio.gallerySizeLevel}
+      onDeleteItem={(itemId) => {
+        if (activeItemId === itemId) {
+          setActiveItemId(null);
+        }
+        studio.deleteItem(itemId);
+      }}
+      onEmptyStateAction={() => fileInputRef.current?.click()}
+      onMoveDraggedItems={(itemIds) =>
+        studio.moveItemsToFolder(itemIds, studio.selectedFolderId)
+      }
+      onOpenItem={setActiveItemId}
+      onReuseItem={studio.reuseItem}
+      onToggleItemSelection={studio.toggleItemSelection}
+    />
+  ) : null;
 
   return (
     <>
-      <div className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={(event) => {
-            studio.uploadFiles(Array.from(event.target.files ?? []));
-            event.target.value = "";
-          }}
-        />
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(event) => {
+          studio.uploadFiles(Array.from(event.target.files ?? []));
+          event.target.value = "";
+        }}
+      />
 
-        <StudioWorkspaceShell
-          topBar={
-            <StudioTopBar
-              hasFalKey={studio.hasFalKey}
-              onDeleteSelected={studio.deleteSelectedItems}
-              onOpenCreateText={studio.openCreateTextComposer}
-              onOpenSettings={() => studio.setSettingsOpen(true)}
-              onOpenUpload={() => fileInputRef.current?.click()}
-              onSizeLevelChange={studio.setGallerySizeLevel}
-              onToggleSelectionMode={studio.toggleSelectionMode}
-              selectedItemCount={studio.selectedItemCount}
-              selectionModeEnabled={studio.selectionModeEnabled}
-              sizeLevel={studio.gallerySizeLevel}
-            />
-          }
-          primaryPanel={
-            <div className="relative h-full min-h-0 min-w-0">
-              <StudioGallery
-                allowUngroupDrop={Boolean(studio.selectedFolderId)}
-                emptyStateActionLabel="Upload Assets"
-                emptyStateLabel="Generate or Upload an asset to get started"
-                items={studio.ungroupedItems}
-                pendingRuns={studio.pendingRuns}
-                selectedItemIdSet={studio.selectedItemIdSet}
-                selectionModeEnabled={studio.selectionModeEnabled}
-                sizeLevel={studio.gallerySizeLevel}
-                onDeleteItem={studio.deleteItem}
-                onEmptyStateAction={() => fileInputRef.current?.click()}
-                onMoveDraggedItems={(itemIds) => studio.moveItemsToFolder(itemIds, null)}
-                onReuseItem={studio.reuseItem}
-                onToggleItemSelection={studio.toggleItemSelection}
-              />
-              <FloatingControlBar
-                draft={studio.currentDraft}
-                hasFalKey={studio.hasFalKey}
-                model={studio.selectedModel}
-                models={studio.models}
-                sections={studio.modelSections}
-                selectedModelId={studio.selectedModelId}
-                onAddReferences={studio.addReferences}
-                onGenerate={studio.generate}
-                onRemoveReference={studio.removeReference}
-                onSelectModel={studio.setSelectedModelId}
-                onUpdateDraft={studio.updateDraft}
-              />
-            </div>
-          }
-          secondaryPanel={
-            studio.selectedFolder ? (
-              <StudioGallery
-                emptyStateActionLabel="Upload Assets"
-                emptyStateLabel="Drag or Upload an asset into this folder to see it here"
-                items={studio.selectedFolderItems}
-                selectedItemIdSet={studio.selectedItemIdSet}
-                selectionModeEnabled={studio.selectionModeEnabled}
-                sizeLevel={studio.gallerySizeLevel}
-                onDeleteItem={studio.deleteItem}
-                onEmptyStateAction={() => fileInputRef.current?.click()}
-                onReuseItem={studio.reuseItem}
-                onToggleItemSelection={studio.toggleItemSelection}
-              />
-            ) : null
-          }
-          rightSidebar={
-            <FolderSidebar
-              folders={studio.folders}
-              folderCounts={studio.folderCounts}
-              selectedFolderCount={studio.selectedFolderItems.length}
-              selectedFolderId={studio.selectedFolderId}
-              ungroupedCount={studio.ungroupedItems.length + studio.pendingRuns.length}
-              onCreateFolder={studio.openCreateFolder}
-              onDeleteFolder={studio.deleteFolder}
-              onDropItemsToFolder={(itemIds, folderId) =>
-                studio.moveItemsToFolder(itemIds, folderId)
-              }
-              onRenameFolder={studio.openRenameFolder}
-              onSelectFolder={studio.setSelectedFolderId}
-            />
-          }
-        />
-      </div>
+      <StudioWorkspaceShell
+        floatingOverlay={
+          <FloatingControlBar
+            draft={studio.currentDraft}
+            hasFalKey={studio.hasFalKey}
+            model={studio.selectedModel}
+            models={studio.models}
+            sections={studio.modelSections}
+            selectedModelId={studio.selectedModelId}
+            onAddReferences={studio.addReferences}
+            onGenerate={studio.generate}
+            onRemoveReference={studio.removeReference}
+            onSelectModel={studio.setSelectedModelId}
+            onUpdateDraft={studio.updateDraft}
+          />
+        }
+        isDesktopViewport={isDesktopViewport}
+        mobileRail={
+          <StudioMobileRail
+            folderCounts={studio.folderCounts}
+            folders={studio.folders}
+            hasFalKey={studio.hasFalKey}
+            selectedFolderId={studio.selectedFolderId}
+            selectionModeEnabled={studio.selectionModeEnabled}
+            sizeLevel={studio.gallerySizeLevel}
+            onCreateFolder={studio.openCreateFolder}
+            onOpenCreateText={studio.openCreateTextComposer}
+            onOpenSettings={() => studio.setSettingsOpen(true)}
+            onOpenUpload={() => fileInputRef.current?.click()}
+            onSelectFolder={studio.setSelectedFolderId}
+            onSizeLevelChange={studio.setGallerySizeLevel}
+            onToggleSelectionMode={studio.toggleSelectionMode}
+          />
+        }
+        onCloseSecondary={() => studio.setSelectedFolderId(null)}
+        primaryPanel={primaryGallery}
+        secondaryPanel={secondaryGallery}
+        rightSidebar={
+          <FolderSidebar
+            folders={studio.folders}
+            selectedFolderCount={studio.selectedFolderItems.length}
+            selectedFolderId={studio.selectedFolderId}
+            onCreateFolder={studio.openCreateFolder}
+            onDeleteFolder={studio.deleteFolder}
+            onDropItemsToFolder={studio.moveItemsToFolder}
+            onRenameFolder={studio.openRenameFolder}
+            onSelectFolder={studio.setSelectedFolderId}
+          />
+        }
+        topBar={
+          <StudioTopBar
+            hasFalKey={studio.hasFalKey}
+            onDeleteSelected={studio.deleteSelectedItems}
+            onOpenCreateText={studio.openCreateTextComposer}
+            onOpenSettings={() => studio.setSettingsOpen(true)}
+            onOpenUpload={() => fileInputRef.current?.click()}
+            onSizeLevelChange={studio.setGallerySizeLevel}
+            onToggleSelectionMode={studio.toggleSelectionMode}
+            selectedItemCount={studio.selectedItemCount}
+            selectionModeEnabled={studio.selectionModeEnabled}
+            sizeLevel={studio.gallerySizeLevel}
+          />
+        }
+      />
 
       <LocalSettingsDialog
         open={studio.settingsOpen}
@@ -136,6 +239,23 @@ export function StudioPage() {
         onBodyChange={studio.setCreateTextBody}
         onClose={() => studio.setCreateTextDialogOpen(false)}
         onSubmit={studio.createTextAsset}
+      />
+
+      <AssetDetailDialog
+        key={activeItem?.id ?? "asset-dialog-closed"}
+        item={activeItem}
+        open={Boolean(activeItem)}
+        onClose={() => setActiveItemId(null)}
+        onDelete={(itemId) => {
+          studio.deleteItem(itemId);
+          setActiveItemId(null);
+        }}
+        onDownload={downloadItem}
+        onReuse={(itemId) => {
+          studio.reuseItem(itemId);
+          setActiveItemId(null);
+        }}
+        onSaveText={studio.updateTextItem}
       />
     </>
   );

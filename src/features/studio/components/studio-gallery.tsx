@@ -6,7 +6,7 @@ import { cn } from "@/lib/cn";
 import type { GenerationRun, LibraryItem } from "../types";
 
 interface StudioGalleryProps {
-  allowUngroupDrop?: boolean;
+  allowDropMove?: boolean;
   emptyStateActionLabel?: string;
   emptyStateLabel: string;
   items: LibraryItem[];
@@ -17,6 +17,7 @@ interface StudioGalleryProps {
   onDeleteItem: (itemId: string) => void;
   onEmptyStateAction?: () => void;
   onMoveDraggedItems?: (itemIds: string[]) => void;
+  onOpenItem: (itemId: string) => void;
   onReuseItem: (itemId: string) => void;
   onToggleItemSelection: (itemId: string) => void;
 }
@@ -121,12 +122,14 @@ function AssetTile({
   selectionModeEnabled,
   onDeleteItem,
   onReuseItem,
+  onOpenItem,
   onToggleItemSelection,
 }: {
   displayItem: GalleryDisplayItem;
   isSelected: boolean;
   selectionModeEnabled: boolean;
   onDeleteItem: (itemId: string) => void;
+  onOpenItem: (itemId: string) => void;
   onReuseItem: (itemId: string) => void;
   onToggleItemSelection: (itemId: string) => void;
 }) {
@@ -168,7 +171,19 @@ function AssetTile({
       onClick={() => {
         if (selectionModeEnabled) {
           onToggleItemSelection(item.id);
+          return;
         }
+
+        onOpenItem(item.id);
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        if (selectionModeEnabled) {
+          onToggleItemSelection(item.id);
+          return;
+        }
+        onOpenItem(item.id);
       }}
       onDragStart={(event) => {
         event.dataTransfer.effectAllowed = "move";
@@ -289,7 +304,7 @@ function AssetTile({
 }
 
 export function StudioGallery({
-  allowUngroupDrop = false,
+  allowDropMove = false,
   emptyStateActionLabel,
   emptyStateLabel,
   items,
@@ -300,6 +315,7 @@ export function StudioGallery({
   onDeleteItem,
   onEmptyStateAction,
   onMoveDraggedItems,
+  onOpenItem,
   onReuseItem,
   onToggleItemSelection,
 }: StudioGalleryProps) {
@@ -336,12 +352,12 @@ export function StudioGallery({
     <div
       className="relative flex h-full min-h-0 min-w-0 flex-col bg-background"
       onDragEnter={(event) => {
-        if (!allowUngroupDrop || !onMoveDraggedItems) return;
+        if (!allowDropMove || !onMoveDraggedItems) return;
         if (!event.dataTransfer.types.includes("application/vnd.vydelabs.items")) return;
         event.preventDefault();
       }}
       onDragOver={(event) => {
-        if (!allowUngroupDrop || !onMoveDraggedItems) return;
+        if (!allowDropMove || !onMoveDraggedItems) return;
         if (!event.dataTransfer.types.includes("application/vnd.vydelabs.items")) return;
         event.preventDefault();
         event.dataTransfer.dropEffect = "move";
@@ -353,7 +369,7 @@ export function StudioGallery({
         setDropActive(false);
       }}
       onDrop={(event) => {
-        if (!allowUngroupDrop || !onMoveDraggedItems) return;
+        if (!allowDropMove || !onMoveDraggedItems) return;
         event.preventDefault();
         setDropActive(false);
         const itemIds = parseDraggedItemIds(event.dataTransfer);
@@ -406,6 +422,7 @@ export function StudioGallery({
                         isSelected={selectedItemIdSet.has(itemId)}
                         selectionModeEnabled={selectionModeEnabled}
                         onDeleteItem={onDeleteItem}
+                        onOpenItem={onOpenItem}
                         onReuseItem={onReuseItem}
                         onToggleItemSelection={onToggleItemSelection}
                       />

@@ -28,43 +28,52 @@ export function FolderDialog({
       : "Update the folder name without changing the items inside it.";
 
   return (
-    <ModalShell open={open} title={title} description={description} onClose={onClose}>
+    <ModalShell
+      open={open}
+      title={title}
+      description={description}
+      onClose={onClose}
+      panelClassName="w-[min(92vw,21rem)] max-w-sm overflow-hidden rounded-3xl"
+      contentClassName="px-0 py-0"
+    >
       <form
-        className="space-y-5"
+        className="space-y-0"
         onSubmit={(event) => {
           event.preventDefault();
           onSave();
         }}
       >
-        <label className="block">
-          <span className="mb-2 block text-sm font-medium text-white">
-            Folder name
-          </span>
-          <input
-            value={value}
-            onChange={(event) => onValueChange(event.target.value)}
-            placeholder="Campaign concepts"
-            className="w-full rounded-full border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-400/60"
-          />
-        </label>
+        <div className="px-6 py-5">
+          <label className="block">
+            <span className="mb-2 block text-sm font-medium text-white">
+              Folder name
+            </span>
+            <input
+              value={value}
+              onChange={(event) => onValueChange(event.target.value)}
+              placeholder="Campaign concepts"
+              className="h-10 w-full rounded-[8px] border-0 bg-foreground/5 px-3 text-[14px] font-medium text-foreground shadow-inner outline-none transition-colors placeholder:font-normal placeholder:text-muted-foreground/60 focus:bg-foreground/10"
+            />
+          </label>
 
-        {errorMessage ? (
-          <p className="text-sm text-red-300">{errorMessage}</p>
-        ) : null}
+          {errorMessage ? (
+            <p className="mt-3 text-left text-[12px] text-destructive">{errorMessage}</p>
+          ) : null}
+        </div>
 
-        <div className="flex items-center justify-end gap-3">
+        <div className="grid h-11 grid-cols-2 border-t border-white/10">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-full border border-white/10 px-4 py-2 text-sm text-white/70 transition hover:border-white/20 hover:text-white"
+            className="flex items-center justify-center border-r border-white/10 text-[15px] text-foreground transition-colors hover:bg-foreground/5 active:bg-foreground/10"
           >
             Cancel
           </button>
           <button
             type="submit"
-            className="rounded-full bg-cyan-400 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-cyan-300"
+            className="flex items-center justify-center text-[15px] font-semibold text-primary transition-colors hover:bg-primary/5 active:bg-primary/10"
           >
-            {mode === "create" ? "Create Folder" : "Save Changes"}
+            {mode === "create" ? "Create" : "Save"}
           </button>
         </div>
       </form>

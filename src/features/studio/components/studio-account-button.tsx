@@ -1,6 +1,5 @@
 "use client";
 
-import { Settings2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 interface StudioAccountButtonProps {
@@ -53,13 +52,13 @@ export function StudioAccountButton({
 
       <span
         className={cn(
-          "relative flex size-[38px] items-center justify-center rounded-full border text-foreground",
+          "relative flex size-[38px] items-center justify-center rounded-full border text-sm font-bold text-foreground",
           hasFalKey
             ? "border-white/8 bg-muted"
             : "border-amber-300/30 bg-amber-400/10"
         )}
       >
-        <Settings2 className="size-4" />
+        V
       </span>
     </button>
   );

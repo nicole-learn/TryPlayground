@@ -464,6 +464,29 @@ export function useStudioApp() {
     deleteItems(selectedItemIds);
   }, [deleteItems, selectedItemIds]);
 
+  const updateTextItem = useCallback(
+    (itemId: string, patch: { title?: string; contentText?: string }) => {
+      setItems((current) =>
+        current.map((item) => {
+          if (item.id !== itemId || item.kind !== "text") {
+            return item;
+          }
+
+          const nextTitle = patch.title?.trim() ?? item.title;
+          const nextContentText = patch.contentText?.trim() ?? item.contentText ?? "";
+
+          return {
+            ...item,
+            title: nextTitle || "Text note",
+            contentText: nextContentText,
+            prompt: nextContentText,
+          };
+        })
+      );
+    },
+    []
+  );
+
   const uploadFiles = useCallback(
     (files: File[]) => {
       if (files.length === 0) return;
@@ -613,6 +636,7 @@ export function useStudioApp() {
     toggleItemSelection,
     toggleSelectionMode,
     ungroupedItems,
+    updateTextItem,
     updateDraft,
     uploadFiles,
   };

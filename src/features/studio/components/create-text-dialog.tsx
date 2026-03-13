@@ -25,50 +25,52 @@ export function CreateTextDialog({
     <ModalShell
       open={open}
       title="Create Text"
-      description="Add a local text note directly into your workspace library."
       onClose={onClose}
+      panelClassName="h-[85vh] min-h-[30rem] max-h-[50rem] max-w-[72rem] overflow-hidden rounded-2xl"
+      contentClassName="px-0 py-0"
+      hideHeader
     >
       <form
-        className="space-y-5"
+        className="flex h-full flex-col overflow-hidden"
         onSubmit={(event) => {
           event.preventDefault();
           onSubmit();
         }}
       >
-        <label className="block">
-          <span className="mb-2 block text-sm font-medium text-white">Title</span>
-          <input
-            value={title}
-            onChange={(event) => onTitleChange(event.target.value)}
-            placeholder="Campaign note"
-            className="w-full rounded-full border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none transition focus:border-primary/60"
-          />
-        </label>
+        <div className="flex shrink-0 items-center justify-between gap-4 px-5 py-3">
+          <div className="min-w-0 flex-1">
+            <input
+              value={title}
+              onChange={(event) => onTitleChange(event.target.value)}
+              placeholder="Prompt"
+              className="w-full rounded-lg border border-transparent bg-transparent px-2 py-1 text-sm font-medium text-foreground outline-none transition-colors placeholder:text-muted-foreground hover:border-border/50 hover:bg-foreground/[0.02] focus:border-border/60 focus:bg-foreground/[0.02]"
+            />
+          </div>
 
-        <label className="block">
-          <span className="mb-2 block text-sm font-medium text-white">Body</span>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              Save Text
+            </button>
+          </div>
+        </div>
+
+        <div className="flex min-h-0 flex-1 flex-col px-5 pb-5">
           <textarea
             value={body}
             onChange={(event) => onBodyChange(event.target.value)}
-            placeholder="Paste a draft, brief, or working note."
-            className="min-h-40 w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm leading-7 text-white outline-none transition focus:border-primary/60"
+            placeholder="Write the prompt body here."
+            className="min-h-0 flex-1 resize-none rounded-xl border border-border/50 bg-foreground/[0.02] px-3 py-3 font-mono text-[13px] leading-6 text-foreground outline-none"
           />
-        </label>
-
-        <div className="flex items-center justify-end gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full border border-white/10 px-4 py-2 text-sm text-white/70 transition hover:border-white/20 hover:text-white"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:brightness-110"
-          >
-            Save Text
-          </button>
         </div>
       </form>
     </ModalShell>

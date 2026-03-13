@@ -6,10 +6,8 @@ import type { StudioFolder } from "../types";
 
 interface FolderSidebarProps {
   folders: StudioFolder[];
-  folderCounts: Record<string, number>;
   selectedFolderCount: number;
   selectedFolderId: string | null;
-  ungroupedCount: number;
   onCreateFolder: () => void;
   onDeleteFolder: (folderId: string) => void;
   onDropItemsToFolder: (itemIds: string[], folderId: string | null) => void;
@@ -31,7 +29,6 @@ function parseDraggedItemIds(dataTransfer: DataTransfer) {
 
 interface FolderRowProps {
   active: boolean;
-  count: number;
   label: string;
   onClick: () => void;
   onDelete?: () => void;
@@ -41,7 +38,6 @@ interface FolderRowProps {
 
 function FolderRow({
   active,
-  count,
   label,
   onClick,
   onDelete,
@@ -77,9 +73,6 @@ function FolderRow({
         )}
       >
         <span className="truncate">{label}</span>
-        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-          {count}
-        </span>
       </button>
 
       {onRename || onDelete ? (
@@ -114,10 +107,8 @@ function FolderRow({
 
 export function FolderSidebar({
   folders,
-  folderCounts,
   selectedFolderCount,
   selectedFolderId,
-  ungroupedCount,
   onCreateFolder,
   onDeleteFolder,
   onDropItemsToFolder,
@@ -128,21 +119,14 @@ export function FolderSidebar({
     <aside className="flex h-full min-h-0 flex-col border-l-[2px] border-border/40 bg-background">
       <div className="stable-scrollbar flex-1 min-h-0 overflow-y-auto p-1.5">
         <div className="space-y-0.5">
-          <FolderRow
-            active={!selectedFolderId}
-            count={ungroupedCount}
-            label="Ungrouped"
-            onClick={() => onSelectFolder(null)}
-            onDrop={(itemIds) => onDropItemsToFolder(itemIds, null)}
-          />
-
           {folders.map((folder) => (
             <FolderRow
               key={folder.id}
               active={selectedFolderId === folder.id}
-              count={folderCounts[folder.id] ?? 0}
               label={folder.name}
-              onClick={() => onSelectFolder(folder.id)}
+              onClick={() =>
+                onSelectFolder(selectedFolderId === folder.id ? null : folder.id)
+              }
               onDelete={() => onDeleteFolder(folder.id)}
               onDrop={(itemIds) => onDropItemsToFolder(itemIds, folder.id)}
               onRename={() => onRenameFolder(folder.id)}
