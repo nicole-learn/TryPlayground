@@ -121,7 +121,7 @@ export function StudioTopBar({
           <Upload className="size-3.5" />
           <span>Upload Files</span>
         </ActionPillButton>
-        <div className="flex h-9 w-[166px] shrink-0 items-center rounded-full border border-white/10 bg-white/[0.03] px-3">
+        <div className="flex h-9 w-[166px] shrink-0 items-center rounded-full bg-white/[0.03] px-3">
           <Slider
             min={0}
             max={6}
