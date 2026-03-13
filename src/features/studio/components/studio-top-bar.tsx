@@ -90,23 +90,28 @@ export function StudioTopBar({
         </div>
       </div>
 
-      {selectedItemCount > 0 ? (
-        <div className="pointer-events-none absolute inset-y-0 left-1/2 z-10 hidden -translate-x-1/2 items-center xl:flex">
-          <div className="pointer-events-auto flex items-center gap-2">
+      <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        {selectedItemCount > 0 ? (
+          <div className="hidden items-center gap-2 xl:flex">
             <button
               type="button"
               onClick={onClearSelection}
               aria-label="Clear selected assets"
               title="Clear selected assets"
-              className="inline-flex h-[34px] items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 text-[12.5px] font-medium text-foreground transition-all duration-150 hover:bg-white/[0.06] active:scale-[0.98]"
+              className="inline-flex size-[38px] items-center justify-center rounded-full border border-white/12 bg-white/[0.03] text-foreground transition-all duration-150 hover:bg-white/[0.06] active:scale-[0.98]"
             >
-              <X className="size-[13px]" />
-              <span>{`${selectedItemCount} selected`}</span>
+              <X className="size-[18px]" />
             </button>
+
+            <span className="text-[12.5px] font-medium text-foreground">
+              {selectedItemCount === 1
+                ? "1 selected"
+                : `${selectedItemCount} selected`}
+            </span>
 
             <ActionPillButton
               ariaLabel="Download selected"
-              className="min-w-[108px] border-primary/35 bg-primary text-primary-foreground hover:bg-primary/92"
+              className="min-w-[108px] border-primary/45 bg-primary/10 text-primary hover:bg-primary/14"
               onClick={onDownloadSelected}
             >
               <Download className="size-[13px]" />
@@ -115,17 +120,15 @@ export function StudioTopBar({
 
             <ActionPillButton
               ariaLabel="Delete selected"
-              className="min-w-[96px] border-red-500/28 bg-red-500/90 text-white hover:bg-red-500"
+              className="min-w-[96px] border-destructive/45 bg-destructive/10 text-destructive hover:bg-destructive/14"
               onClick={onDeleteSelected}
             >
               <Trash2 className="size-[13px]" />
               <span>Delete</span>
             </ActionPillButton>
           </div>
-        </div>
-      ) : null}
+        ) : null}
 
-      <div className="ml-auto flex shrink-0 items-center gap-1.5">
         <ActionPillButton
           active={selectionModeEnabled}
           ariaLabel="Selection mode"

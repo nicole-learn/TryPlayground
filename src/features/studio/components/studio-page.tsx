@@ -247,6 +247,14 @@ export function StudioPage({
       onMoveDraggedItems={(itemIds) => studio.moveItemsToFolder(itemIds, null)}
       onOpenItem={setActiveItemId}
       onCancelRun={studio.cancelRun}
+      onDownloadItem={(itemId) => {
+        const item = studio.items.find((entry) => entry.id === itemId);
+        if (!item) {
+          return;
+        }
+
+        void downloadItem(item);
+      }}
       onReuseItem={studio.reuseItem}
       onToggleItemSelection={studio.toggleItemSelection}
     />
@@ -278,6 +286,14 @@ export function StudioPage({
       }
       onOpenItem={setActiveItemId}
       onCancelRun={studio.cancelRun}
+      onDownloadItem={(itemId) => {
+        const item = studio.items.find((entry) => entry.id === itemId);
+        if (!item) {
+          return;
+        }
+
+        void downloadItem(item);
+      }}
       onReuseItem={studio.reuseItem}
       onToggleItemSelection={studio.toggleItemSelection}
     />

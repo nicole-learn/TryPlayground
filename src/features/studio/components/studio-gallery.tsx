@@ -6,6 +6,7 @@ import {
   Check,
   Clock3,
   Copy,
+  Download,
   Loader2,
   Play,
   Square,
@@ -59,6 +60,7 @@ interface StudioGalleryProps {
   onMoveDraggedItems?: (itemIds: string[]) => void;
   onOpenItem: (itemId: string) => void;
   onCancelRun?: (runId: string) => void;
+  onDownloadItem: (itemId: string) => void;
   onReuseItem: (itemId: string) => void;
   onToggleItemSelection: (itemId: string) => void;
 }
@@ -298,6 +300,7 @@ function AssetTile({
   onDragEndItem,
   onDragStartItem,
   onCancelRun,
+  onDownloadItem,
   onReuseItem,
   onOpenItem,
   onToggleItemSelection,
@@ -317,6 +320,7 @@ function AssetTile({
     y: number;
   }) => void;
   onCancelRun?: (runId: string) => void;
+  onDownloadItem: (itemId: string) => void;
   onOpenItem: (itemId: string) => void;
   onReuseItem: (itemId: string) => void;
   onToggleItemSelection: (itemId: string) => void;
@@ -403,6 +407,9 @@ function AssetTile({
   const thumbnailUrl = getLibraryItemThumbnailUrl(item);
   const mediaDurationLabel = formatMediaDurationLabel(item.mediaDurationSeconds);
   const showTransparentChecker = isTransparentImageItem(item);
+  const checkboxVisible = selectionModeEnabled || isSelected;
+  const hoverControlsVisible =
+    "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100";
 
   return (
     <div
@@ -456,7 +463,7 @@ function AssetTile({
       aria-label={item.prompt || item.title}
     >
       {assetStatusVisual ? (
-        <div className="pointer-events-none absolute left-3 top-3 z-20">
+        <div className="pointer-events-none absolute left-3 top-[46px] z-20">
           <StatusBadge
             className={assetStatusVisual.badgeClassName}
             icon={assetStatusVisual.icon}
@@ -484,7 +491,7 @@ function AssetTile({
             </span>
           </div>
           {mediaDurationLabel ? (
-            <div className="absolute right-3 top-3 z-20 rounded-full border border-white/14 bg-black/40 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-white/82 backdrop-blur-sm">
+            <div className="absolute right-3 top-[46px] z-20 rounded-full border border-white/14 bg-black/40 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-white/82 backdrop-blur-sm">
               {mediaDurationLabel}
             </div>
           ) : null}
@@ -539,36 +546,50 @@ function AssetTile({
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-black/20 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100" />
       ) : null}
 
-      {selectionModeEnabled ? (
-        <div
+      <div
+        className={cn(
+          "absolute left-3 top-3 z-20 transition-opacity duration-150",
+          checkboxVisible ? "opacity-100" : hoverControlsVisible
+        )}
+      >
+        <button
+          type="button"
+          onMouseDown={handleOverlayButtonMouseDown}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleItemSelection(item.id);
+          }}
           className={cn(
-            "absolute left-3 top-3 z-20 transition-opacity duration-150",
-            isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+            "inline-flex size-8 items-center justify-center rounded-md border backdrop-blur-sm transition",
+            isSelected
+              ? "border-primary bg-primary text-primary-foreground hover:bg-primary/90"
+              : "border-white/65 bg-black/50 text-white hover:bg-black/65"
           )}
+          aria-label={isSelected ? `Deselect ${item.title}` : `Select ${item.title}`}
+          aria-pressed={isSelected}
+          title={isSelected ? "Deselect asset" : "Select asset"}
         >
-          <button
-            type="button"
-            onMouseDown={handleOverlayButtonMouseDown}
-            onClick={(event) => {
-              event.stopPropagation();
-              onToggleItemSelection(item.id);
-            }}
-            className={cn(
-              "inline-flex size-8 items-center justify-center rounded-md border backdrop-blur-sm transition",
-              isSelected
-                ? "border-primary bg-primary text-primary-foreground hover:bg-primary/90"
-                : "border-white/65 bg-black/50 text-white hover:bg-black/65"
-            )}
-            aria-label={isSelected ? `Deselect ${item.title}` : `Select ${item.title}`}
-            aria-pressed={isSelected}
-            title={isSelected ? "Deselect asset" : "Select asset"}
-          >
-            {isSelected ? <Check className="size-3.5" /> : <Square className="size-3.5" />}
-          </button>
-        </div>
-      ) : null}
+          {isSelected ? <Check className="size-3.5" /> : <Square className="size-3.5" />}
+        </button>
+      </div>
 
-      <div className="absolute bottom-3 left-3 z-20 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+      <div className={cn("absolute right-3 top-3 z-20 transition-opacity duration-150", hoverControlsVisible)}>
+        <button
+          type="button"
+          onMouseDown={handleOverlayButtonMouseDown}
+          onClick={(event) => {
+            event.stopPropagation();
+            onDownloadItem(item.id);
+          }}
+          className="inline-flex size-8 items-center justify-center rounded-md border border-white/65 bg-black/50 text-white backdrop-blur-sm transition hover:bg-black/65"
+          aria-label={`Download ${item.title}`}
+          title="Download asset"
+        >
+          <Download className="size-3.5" />
+        </button>
+      </div>
+
+      <div className={cn("absolute bottom-3 left-3 z-20 transition-opacity duration-150", hoverControlsVisible)}>
         <button
           type="button"
           onMouseDown={handleOverlayButtonMouseDown}
@@ -584,7 +605,7 @@ function AssetTile({
         </button>
       </div>
 
-      <div className="absolute bottom-3 right-3 z-20 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+      <div className={cn("absolute bottom-3 right-3 z-20 transition-opacity duration-150", hoverControlsVisible)}>
         <button
           type="button"
           onMouseDown={handleOverlayButtonMouseDown}
@@ -649,6 +670,7 @@ export function StudioGallery({
   onMoveDraggedItems,
   onOpenItem,
   onCancelRun,
+  onDownloadItem,
   onReuseItem,
   onToggleItemSelection,
 }: StudioGalleryProps) {
@@ -790,6 +812,7 @@ export function StudioGallery({
                         onDragEndItem={onItemDragEnd}
                         onDragStartItem={onItemDragStart}
                         onCancelRun={onCancelRun}
+                        onDownloadItem={onDownloadItem}
                         onOpenItem={onOpenItem}
                         onReuseItem={onReuseItem}
                         onToggleItemSelection={onToggleItemSelection}
