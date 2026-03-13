@@ -7,7 +7,6 @@ const STORAGE_KEYS = {
   gridDensity: "tryplayground.studio.gridDensity",
   providerSettings: "tryplayground.studio.providerSettings",
   localWorkspaceSnapshot: "tryplayground.studio.local.workspaceSnapshot",
-  hostedWorkspaceSnapshot: "tryplayground.studio.hosted.workspaceSnapshot",
 } as const;
 
 const LEGACY_STORAGE_KEYS = {
@@ -62,12 +61,6 @@ function removeValue(storage: Storage | null, key: string) {
   } catch {
     // Ignore storage failures so the studio remains usable in restricted browsers.
   }
-}
-
-function getSnapshotStorageKey(mode: "local" | "hosted") {
-  return mode === "hosted"
-    ? STORAGE_KEYS.hostedWorkspaceSnapshot
-    : STORAGE_KEYS.localWorkspaceSnapshot;
 }
 
 function sanitizeSnapshot(snapshot: StudioWorkspaceSnapshot): StudioWorkspaceSnapshot {
@@ -126,10 +119,10 @@ export function saveStoredProviderSettings(value: StudioProviderSettings) {
   });
 }
 
-export function loadStoredWorkspaceSnapshot(mode: "local" | "hosted") {
+export function loadStoredWorkspaceSnapshot() {
   const snapshot = readJson<StudioWorkspaceSnapshot>(
     getLocalStorage(),
-    getSnapshotStorageKey(mode)
+    STORAGE_KEYS.localWorkspaceSnapshot
   );
 
   if (!snapshot || snapshot.schemaVersion !== STUDIO_STATE_SCHEMA_VERSION) {
@@ -140,12 +133,11 @@ export function loadStoredWorkspaceSnapshot(mode: "local" | "hosted") {
 }
 
 export function saveStoredWorkspaceSnapshot(
-  mode: "local" | "hosted",
   snapshot: StudioWorkspaceSnapshot
 ) {
   writeJson(
     getLocalStorage(),
-    getSnapshotStorageKey(mode),
+    STORAGE_KEYS.localWorkspaceSnapshot,
     sanitizeSnapshot(snapshot)
   );
 }

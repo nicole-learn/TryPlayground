@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import type { HostedStudioMutation } from "@/features/studio/studio-hosted-mock-api";
 import {
-  getHostedMockSnapshot,
+  getHostedMockSyncPayload,
   mutateHostedMockSnapshot,
 } from "@/server/studio/hosted-mock-store";
 import {
@@ -25,6 +25,13 @@ export async function GET(request: Request) {
     );
   }
 
+  const url = new URL(request.url);
+  const sinceRevisionValue = url.searchParams.get("sinceRevision");
+  const sinceRevision =
+    sinceRevisionValue && /^\d+$/.test(sinceRevisionValue)
+      ? Number.parseInt(sinceRevisionValue, 10)
+      : null;
+
   const cookieStore = await cookies();
   const existingSessionToken =
     cookieStore.get(HOSTED_MOCK_SESSION_COOKIE)?.value ?? null;
@@ -33,15 +40,14 @@ export async function GET(request: Request) {
       ? existingSessionToken
       : createHostedMockSessionToken();
 
-  const response = NextResponse.json({
-    snapshot: getHostedMockSnapshot(),
-  });
+  const response = NextResponse.json(getHostedMockSyncPayload(sinceRevision));
   response.cookies.set(HOSTED_MOCK_SESSION_COOKIE, sessionToken, {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
   });
+  response.headers.set("Cache-Control", "no-store");
   return response;
 }
 
@@ -68,8 +74,13 @@ export async function POST(request: Request) {
 
   try {
     const mutation = (await request.json()) as HostedStudioMutation;
-    const snapshot = await mutateHostedMockSnapshot(mutation);
-    return NextResponse.json({ snapshot });
+    const state = await mutateHostedMockSnapshot(mutation);
+    const response = NextResponse.json({
+      revision: state.revision,
+      state,
+    });
+    response.headers.set("Cache-Control", "no-store");
+    return response;
   } catch (error) {
     return NextResponse.json(
       {

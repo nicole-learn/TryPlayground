@@ -3,11 +3,33 @@ import type {
   LibraryItemKind,
   PersistedStudioDraft,
   StudioCreditPurchaseAmount,
-  StudioWorkspaceSnapshot,
+  StudioHostedClientStateDefaults,
+  StudioHostedWorkspaceState,
 } from "./types";
 
-export interface HostedStudioSnapshotResponse {
-  snapshot: StudioWorkspaceSnapshot;
+export type HostedStudioSyncResponse =
+  | {
+      kind: "bootstrap";
+      revision: number;
+      syncIntervalMs: number;
+      uiStateDefaults: StudioHostedClientStateDefaults;
+      state: StudioHostedWorkspaceState;
+    }
+  | {
+      kind: "refresh";
+      revision: number;
+      syncIntervalMs: number;
+      state: StudioHostedWorkspaceState;
+    }
+  | {
+      kind: "noop";
+      revision: number;
+      syncIntervalMs: number;
+    };
+
+export interface HostedStudioMutationResponse {
+  revision: number;
+  state: StudioHostedWorkspaceState;
 }
 
 export interface HostedStudioUploadManifestEntry {

@@ -53,7 +53,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const snapshot = await uploadHostedMockFiles({
+    const state = await uploadHostedMockFiles({
       files,
       manifest,
       folderId:
@@ -62,7 +62,12 @@ export async function POST(request: Request) {
           : null,
     });
 
-    return NextResponse.json({ snapshot });
+    const response = NextResponse.json({
+      revision: state.revision,
+      state,
+    });
+    response.headers.set("Cache-Control", "no-store");
+    return response;
   } catch (error) {
     return NextResponse.json(
       {

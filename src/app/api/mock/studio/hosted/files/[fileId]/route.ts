@@ -36,7 +36,7 @@ export async function GET(
     headers: {
       "Content-Type": file.mimeType,
       "Content-Disposition": `inline; filename="${file.fileName}"`,
-      "Cache-Control": "no-store",
+      "Cache-Control": "private, max-age=31536000, immutable",
     },
   });
 }

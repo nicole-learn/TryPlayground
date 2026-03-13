@@ -11,6 +11,11 @@ import {
 } from "@/features/studio/studio-local-runtime-data";
 import { createAudioThumbnailUrl } from "@/features/studio/studio-asset-thumbnails";
 import {
+  buildHostedWorkspaceState,
+  extractHostedClientStateDefaults,
+  extractStudioWorkspaceDomainState,
+} from "@/features/studio/studio-runtime-snapshot";
+import {
   getStudioRunCompletionDelayMs,
   getHostedStudioFairShare,
   resolveStudioGenerationRequestMode,
@@ -37,8 +42,9 @@ import type {
   LibraryItem,
   PersistedStudioDraft,
   StudioFolder,
+  StudioHostedClientStateDefaults,
+  StudioHostedWorkspaceState,
   StudioRunFile,
-  StudioWorkspaceSnapshot,
 } from "@/features/studio/types";
 
 type HostedFileRecord = {
@@ -53,7 +59,8 @@ type HostedUploadedFileEntry = {
 };
 
 type HostedMockStore = {
-  snapshot: StudioWorkspaceSnapshot;
+  snapshot: StudioHostedWorkspaceState;
+  uiStateDefaults: StudioHostedClientStateDefaults;
   files: Map<string, HostedFileRecord>;
   dispatchTimers: Map<string, ReturnType<typeof setTimeout>>;
   completionTimers: Map<string, ReturnType<typeof setTimeout>>;
@@ -61,7 +68,22 @@ type HostedMockStore = {
 
 const STORE_KEY = "__TRYPLAYGROUND_HOSTED_MOCK_STORE__";
 
-function cloneSnapshot(snapshot: StudioWorkspaceSnapshot) {
+const HOSTED_SYNC_INTERVAL_MS = 1400;
+
+function createHostedSeedState() {
+  const seedSnapshot = createStudioSeedSnapshot("hosted");
+
+  return {
+    snapshot: buildHostedWorkspaceState({
+      domainState: extractStudioWorkspaceDomainState(seedSnapshot),
+      revision: 1,
+      syncedAt: new Date().toISOString(),
+    }),
+    uiStateDefaults: extractHostedClientStateDefaults(seedSnapshot),
+  };
+}
+
+function cloneSnapshot(snapshot: StudioHostedWorkspaceState) {
   return structuredClone(snapshot);
 }
 
@@ -71,7 +93,7 @@ function clearTimer(timer: ReturnType<typeof setTimeout> | undefined) {
   }
 }
 
-function resolveHostedMockUserId(snapshot: StudioWorkspaceSnapshot) {
+function resolveHostedMockUserId(snapshot: StudioHostedWorkspaceState) {
   return snapshot.profile.id;
 }
 
@@ -137,7 +159,7 @@ function validateHostedUploadedFiles(params: {
   });
 }
 
-function getHostedWorkspaceId(snapshot: StudioWorkspaceSnapshot) {
+function getHostedWorkspaceId(snapshot: StudioHostedWorkspaceState) {
   return snapshot.folders[0]?.workspaceId ?? "workspace-hosted";
 }
 
@@ -147,8 +169,10 @@ function getStore(): HostedMockStore {
   };
 
   if (!globalStore[STORE_KEY]) {
+    const seedState = createHostedSeedState();
     globalStore[STORE_KEY] = {
-      snapshot: createStudioSeedSnapshot("hosted"),
+      snapshot: seedState.snapshot,
+      uiStateDefaults: seedState.uiStateDefaults,
       files: new Map(),
       dispatchTimers: new Map(),
       completionTimers: new Map(),
@@ -170,17 +194,21 @@ function resetHostedMockStore(store: HostedMockStore) {
   store.dispatchTimers.clear();
   store.completionTimers.clear();
   store.files.clear();
-  store.snapshot = createStudioSeedSnapshot("hosted");
+  const seedState = createHostedSeedState();
+  store.snapshot = seedState.snapshot;
+  store.uiStateDefaults = seedState.uiStateDefaults;
+  syncHostedQueue(store);
 }
 
-function syncFolderMemberships(snapshot: StudioWorkspaceSnapshot) {
-  snapshot.folderItems = snapshot.libraryItems.flatMap((item) =>
-    item.folderIds.map((folderId) => ({
-      folderId,
-      libraryItemId: item.id,
-      createdAt: item.createdAt,
-    }))
-  );
+function publishHostedSnapshotChange(
+  store: HostedMockStore,
+  changedAt = new Date().toISOString()
+) {
+  store.snapshot = {
+    ...store.snapshot,
+    revision: store.snapshot.revision + 1,
+    syncedAt: changedAt,
+  };
 }
 
 function scheduleDispatch(store: HostedMockStore, runId: string, delayMs = 320) {
@@ -217,6 +245,7 @@ function scheduleDispatch(store: HostedMockStore, runId: string, delayMs = 320) 
       canCancel: false,
     });
 
+    publishHostedSnapshotChange(store, startedAt);
     syncHostedQueue(store);
   }, delayMs);
 
@@ -254,6 +283,7 @@ function scheduleCompletion(store: HostedMockStore, runId: string) {
         store.snapshot.creditBalance.updatedAt = finishedAt;
       }
 
+      publishHostedSnapshotChange(store, finishedAt);
       syncHostedQueue(store);
       return;
     }
@@ -306,7 +336,7 @@ function scheduleCompletion(store: HostedMockStore, runId: string) {
     if (nextRunFile) {
       store.snapshot.runFiles.unshift(nextRunFile);
     }
-    syncFolderMemberships(store.snapshot);
+    publishHostedSnapshotChange(store, finishedAt);
     syncHostedQueue(store);
   }, getStudioRunCompletionDelayMs(run));
 
@@ -348,51 +378,82 @@ function syncHostedQueue(store: HostedMockStore) {
   }
 }
 
-export function getHostedMockSnapshot() {
-  return cloneSnapshot(getStore().snapshot);
+export function getHostedMockBootstrapPayload() {
+  const store = getStore();
+
+  return {
+    state: cloneSnapshot(store.snapshot),
+    uiStateDefaults: structuredClone(store.uiStateDefaults),
+    revision: store.snapshot.revision,
+    syncIntervalMs: HOSTED_SYNC_INTERVAL_MS,
+  };
+}
+
+export function getHostedMockSyncPayload(sinceRevision: number | null) {
+  const store = getStore();
+
+  if (sinceRevision !== null && sinceRevision >= store.snapshot.revision) {
+    return {
+      kind: "noop" as const,
+      revision: store.snapshot.revision,
+      syncIntervalMs: HOSTED_SYNC_INTERVAL_MS,
+    };
+  }
+
+  return {
+    kind: sinceRevision === null ? ("bootstrap" as const) : ("refresh" as const),
+    revision: store.snapshot.revision,
+    syncIntervalMs: HOSTED_SYNC_INTERVAL_MS,
+    uiStateDefaults:
+      sinceRevision === null ? structuredClone(store.uiStateDefaults) : undefined,
+    state: cloneSnapshot(store.snapshot),
+  };
 }
 
 export async function mutateHostedMockSnapshot(mutation: HostedStudioMutation) {
   const store = getStore();
   const snapshot = store.snapshot;
+  let didChange = false;
+  let changedAt = new Date().toISOString();
 
   switch (mutation.action) {
     case "purchase_credits": {
       if (snapshot.creditBalance) {
         snapshot.creditBalance.balanceCredits += mutation.credits;
-        snapshot.creditBalance.updatedAt = new Date().toISOString();
+        snapshot.creditBalance.updatedAt = changedAt;
       }
       if (snapshot.activeCreditPack) {
         snapshot.activeCreditPack = {
           ...snapshot.activeCreditPack,
           credits: mutation.credits,
           priceCents: mutation.credits,
-          updatedAt: new Date().toISOString(),
+          updatedAt: changedAt,
         };
       }
+      didChange = true;
       break;
     }
     case "set_enabled_models": {
       snapshot.modelConfiguration = {
         enabledModelIds: normalizeStudioEnabledModelIds(mutation.enabledModelIds),
-        updatedAt: new Date().toISOString(),
+        updatedAt: changedAt,
       };
+      didChange = true;
       break;
     }
     case "sign_out":
     case "delete_account": {
       resetHostedMockStore(store);
-      break;
+      return cloneSnapshot(store.snapshot);
     }
     case "create_folder": {
-      const createdAt = new Date().toISOString();
       const nextFolder: StudioFolder = {
         id: createStudioId("folder"),
         userId: snapshot.profile.id,
         workspaceId: getHostedWorkspaceId(snapshot),
         name: mutation.name.trim(),
-        createdAt,
-        updatedAt: createdAt,
+        createdAt: changedAt,
+        updatedAt: changedAt,
         sortOrder: 0,
       };
       snapshot.folders = [
@@ -402,23 +463,25 @@ export async function mutateHostedMockSnapshot(mutation: HostedStudioMutation) {
           sortOrder: index + 1,
         })),
       ];
+      didChange = true;
       break;
     }
     case "rename_folder": {
-      const updatedAt = new Date().toISOString();
       snapshot.folders = snapshot.folders.map((folder) =>
         folder.id === mutation.folderId
-          ? { ...folder, name: mutation.name.trim(), updatedAt }
+          ? { ...folder, name: mutation.name.trim(), updatedAt: changedAt }
           : folder
       );
+      didChange = true;
       break;
     }
     case "reorder_folders": {
       snapshot.folders = reorderStudioFoldersByIds(
         snapshot.folders,
         mutation.orderedFolderIds,
-        new Date().toISOString()
+        changedAt
       );
+      didChange = true;
       break;
     }
     case "delete_folder": {
@@ -430,17 +493,16 @@ export async function mutateHostedMockSnapshot(mutation: HostedStudioMutation) {
         }));
       snapshot.libraryItems = snapshot.libraryItems.map((item) =>
         item.folderIds.includes(mutation.folderId)
-          ? { ...item, folderId: null, folderIds: [], updatedAt: new Date().toISOString() }
+          ? { ...item, folderId: null, folderIds: [], updatedAt: changedAt }
           : item
       );
       snapshot.generationRuns = snapshot.generationRuns.map((run) =>
         run.folderId === mutation.folderId ? { ...run, folderId: null } : run
       );
-      syncFolderMemberships(snapshot);
+      didChange = true;
       break;
     }
     case "move_items": {
-      const updatedAt = new Date().toISOString();
       const itemIdSet = new Set(mutation.itemIds);
       snapshot.libraryItems = snapshot.libraryItems.map((item) =>
         itemIdSet.has(item.id)
@@ -448,11 +510,11 @@ export async function mutateHostedMockSnapshot(mutation: HostedStudioMutation) {
               ...item,
               folderId: mutation.folderId,
               folderIds: mutation.folderId ? [mutation.folderId] : [],
-              updatedAt,
+              updatedAt: changedAt,
             }
           : item
       );
-      syncFolderMemberships(snapshot);
+      didChange = true;
       break;
     }
     case "delete_items": {
@@ -474,11 +536,10 @@ export async function mutateHostedMockSnapshot(mutation: HostedStudioMutation) {
           ? { ...run, outputAssetId: null }
           : run
       );
-      syncFolderMemberships(snapshot);
+      didChange = true;
       break;
     }
     case "update_text_item": {
-      const updatedAt = new Date().toISOString();
       snapshot.libraryItems = snapshot.libraryItems.map((item) => {
         if (item.id !== mutation.itemId || item.kind !== "text") {
           return item;
@@ -490,13 +551,13 @@ export async function mutateHostedMockSnapshot(mutation: HostedStudioMutation) {
           title: mutation.title?.trim() || item.title,
           contentText: nextContentText,
           prompt: nextContentText,
-          updatedAt,
+          updatedAt: changedAt,
         };
       });
+      didChange = true;
       break;
     }
     case "create_text_item": {
-      const createdAt = new Date().toISOString();
       const body = mutation.body.trim();
       const item: LibraryItem = {
         id: createStudioId("asset"),
@@ -511,8 +572,8 @@ export async function mutateHostedMockSnapshot(mutation: HostedStudioMutation) {
         previewUrl: null,
         thumbnailUrl: null,
         contentText: body,
-        createdAt,
-        updatedAt: createdAt,
+        createdAt: changedAt,
+        updatedAt: changedAt,
         modelId: null,
         runId: null,
         provider: "fal",
@@ -536,7 +597,7 @@ export async function mutateHostedMockSnapshot(mutation: HostedStudioMutation) {
         errorMessage: null,
       };
       snapshot.libraryItems.unshift(item);
-      syncFolderMemberships(snapshot);
+      didChange = true;
       break;
     }
     case "generate": {
@@ -578,7 +639,6 @@ export async function mutateHostedMockSnapshot(mutation: HostedStudioMutation) {
         throw new Error("Not enough credits to queue this generation.");
       }
 
-      const createdAt = new Date().toISOString();
       const run: GenerationRun = {
         id: createStudioId("run"),
         userId: snapshot.profile.id,
@@ -591,13 +651,13 @@ export async function mutateHostedMockSnapshot(mutation: HostedStudioMutation) {
         requestMode,
         status: "queued",
         prompt: persistedDraft.prompt,
-        createdAt,
-        queueEnteredAt: createdAt,
+        createdAt: changedAt,
+        queueEnteredAt: changedAt,
         startedAt: null,
         completedAt: null,
         failedAt: null,
         cancelledAt: null,
-        updatedAt: createdAt,
+        updatedAt: changedAt,
         summary: createGenerationRunSummary(model, hydratedDraft),
         outputAssetId: null,
         previewUrl: createGenerationRunPreviewUrl(model, hydratedDraft),
@@ -640,8 +700,9 @@ export async function mutateHostedMockSnapshot(mutation: HostedStudioMutation) {
       snapshot.generationRuns.unshift(run);
       if (snapshot.creditBalance) {
         snapshot.creditBalance.balanceCredits -= estimatedCredits;
-        snapshot.creditBalance.updatedAt = createdAt;
+        snapshot.creditBalance.updatedAt = changedAt;
       }
+      didChange = true;
       syncHostedQueue(store);
       break;
     }
@@ -650,24 +711,28 @@ export async function mutateHostedMockSnapshot(mutation: HostedStudioMutation) {
       if (!run || (run.status !== "queued" && run.status !== "pending")) {
         break;
       }
-      const cancelledAt = new Date().toISOString();
+      changedAt = new Date().toISOString();
       run.status = "cancelled";
-      run.cancelledAt = cancelledAt;
-      run.completedAt = cancelledAt;
-      run.updatedAt = cancelledAt;
+      run.cancelledAt = changedAt;
+      run.completedAt = changedAt;
+      run.updatedAt = changedAt;
       run.providerStatus = "cancelled";
       run.canCancel = false;
       if (snapshot.creditBalance && run.estimatedCredits) {
         snapshot.creditBalance.balanceCredits += run.estimatedCredits;
-        snapshot.creditBalance.updatedAt = cancelledAt;
+        snapshot.creditBalance.updatedAt = changedAt;
       }
       clearTimer(store.dispatchTimers.get(run.id));
       store.dispatchTimers.delete(run.id);
+      didChange = true;
       break;
     }
   }
 
   syncHostedQueue(store);
+  if (didChange) {
+    publishHostedSnapshotChange(store, changedAt);
+  }
   return cloneSnapshot(store.snapshot);
 }
 
@@ -769,7 +834,7 @@ export async function uploadHostedMockFiles(params: {
     store.snapshot.libraryItems.unshift(item);
   }
 
-  syncFolderMemberships(store.snapshot);
+  publishHostedSnapshotChange(store, createdAt);
   return cloneSnapshot(store.snapshot);
 }
 

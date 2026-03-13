@@ -68,7 +68,8 @@ import {
 } from "./studio-model-catalog";
 import type {
   HostedStudioMutation,
-  HostedStudioSnapshotResponse,
+  HostedStudioMutationResponse,
+  HostedStudioSyncResponse,
   HostedStudioUploadManifestEntry,
 } from "./studio-hosted-mock-api";
 import { quoteStudioDraftPricing } from "./studio-model-pricing";
@@ -83,6 +84,7 @@ import type {
   StudioFolder,
   StudioFolderEditorMode,
   StudioHostedAccount,
+  StudioHostedWorkspaceState,
   StudioModelConfiguration,
   StudioProviderConnectionStatus,
   StudioProviderSaveResult,
@@ -121,17 +123,25 @@ function createEmptyDraftFrameMap() {
   ) as Record<string, DraftFrameInputs>;
 }
 
-async function fetchHostedSnapshot(signal?: AbortSignal) {
-  const response = await fetch("/api/mock/studio/hosted", {
+async function fetchHostedSync(params: {
+  sinceRevision: number | null;
+  signal?: AbortSignal;
+}) {
+  const searchParams = new URLSearchParams();
+  if (typeof params.sinceRevision === "number") {
+    searchParams.set("sinceRevision", String(params.sinceRevision));
+  }
+
+  const response = await fetch(`/api/mock/studio/hosted?${searchParams.toString()}`, {
     method: "GET",
     cache: "no-store",
     credentials: "same-origin",
     headers: {
       "x-tryplayground-mock-client": "hosted",
     },
-    signal,
+    signal: params.signal,
   });
-  const payload = (await response.json()) as HostedStudioSnapshotResponse & {
+  const payload = (await response.json()) as HostedStudioSyncResponse & {
     error?: string;
   };
 
@@ -139,7 +149,7 @@ async function fetchHostedSnapshot(signal?: AbortSignal) {
     throw new Error(payload.error ?? "Could not load hosted mock state.");
   }
 
-  return payload.snapshot;
+  return payload;
 }
 
 async function mutateHostedSnapshot(
@@ -157,7 +167,7 @@ async function mutateHostedSnapshot(
     credentials: "same-origin",
     signal,
   });
-  const payload = (await response.json()) as HostedStudioSnapshotResponse & {
+  const payload = (await response.json()) as HostedStudioMutationResponse & {
     error?: string;
   };
 
@@ -165,7 +175,7 @@ async function mutateHostedSnapshot(
     throw new Error(payload.error ?? "Hosted mock mutation failed.");
   }
 
-  return payload.snapshot;
+  return payload;
 }
 
 async function uploadHostedFiles(
@@ -233,7 +243,7 @@ async function uploadHostedFiles(
     },
     signal,
   });
-  const payload = (await response.json()) as HostedStudioSnapshotResponse & {
+  const payload = (await response.json()) as HostedStudioMutationResponse & {
     error?: string;
   };
 
@@ -241,7 +251,7 @@ async function uploadHostedFiles(
     throw new Error(payload.error ?? "Hosted mock upload failed.");
   }
 
-  return payload.snapshot;
+  return payload;
 }
 
 async function validateFalApiKey(falApiKey: string) {
@@ -279,6 +289,8 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   const hostedModeSessionRef = useRef(0);
   const hostedLatestStartedRequestRef = useRef(0);
   const hostedLatestAppliedRequestRef = useRef(0);
+  const hostedRevisionRef = useRef(0);
+  const hostedSyncIntervalRef = useRef(1400);
   const hostedRequestControllersRef = useRef(new Set<AbortController>());
 
   const [profile, setProfile] = useState(seedSnapshot.profile);
@@ -291,7 +303,6 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   const [selectedModelId, setSelectedModelIdState] = useState(seedSnapshot.selectedModelId);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [folders, setFolders] = useState(seedSnapshot.folders);
-  const [folderItems, setFolderItems] = useState(seedSnapshot.folderItems);
   const [items, setItems] = useState(seedSnapshot.libraryItems);
   const [runFiles, setRunFiles] = useState(seedSnapshot.runFiles);
   const [runs, setRuns] = useState(seedSnapshot.generationRuns);
@@ -358,7 +369,6 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       });
       setQueueSettings(nextSnapshot.queueSettings);
       setFolders(sortStudioFoldersByOrder(nextSnapshot.folders));
-      setFolderItems(nextSnapshot.folderItems);
       setRunFiles(nextSnapshot.runFiles);
       setRuns(nextSnapshot.generationRuns);
       setItems(nextSnapshot.libraryItems);
@@ -371,6 +381,24 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     },
     []
   );
+
+  const applyHostedState = useCallback((nextState: StudioHostedWorkspaceState) => {
+    hostedRevisionRef.current = nextState.revision;
+    setProfile(nextState.profile);
+    setCreditBalance(nextState.creditBalance);
+    setActiveCreditPack(nextState.activeCreditPack);
+    setModelConfiguration({
+      ...nextState.modelConfiguration,
+      enabledModelIds: normalizeStudioEnabledModelIds(
+        nextState.modelConfiguration.enabledModelIds
+      ),
+    });
+    setQueueSettings(nextState.queueSettings);
+    setFolders(sortStudioFoldersByOrder(nextState.folders));
+    setRunFiles(nextState.runFiles);
+    setRuns(nextState.generationRuns);
+    setItems(nextState.libraryItems);
+  }, []);
 
   useEffect(() => {
     runsRef.current = runs;
@@ -440,8 +468,8 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
 
   const applyHostedResponse = useCallback(
     (
-      nextSnapshot: StudioWorkspaceSnapshot,
-      params: { preserveDrafts?: boolean; requestId: number; sessionId: number }
+      nextState: StudioHostedWorkspaceState,
+      params: { requestId: number; sessionId: number }
     ) => {
       if (hostedModeSessionRef.current !== params.sessionId) {
         return false;
@@ -452,10 +480,10 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       }
 
       hostedLatestAppliedRequestRef.current = params.requestId;
-      applySnapshot(nextSnapshot, { preserveDrafts: params.preserveDrafts });
+      applyHostedState(nextState);
       return true;
     },
-    [applySnapshot]
+    [applyHostedState]
   );
 
   const cleanupPreviewUrls = useCallback(() => {
@@ -498,6 +526,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     hostedModeSessionRef.current += 1;
     hostedLatestStartedRequestRef.current = 0;
     hostedLatestAppliedRequestRef.current = 0;
+    hostedRevisionRef.current = 0;
     abortHostedRequests();
     clearAllTimers();
     cleanupPreviewUrls();
@@ -530,18 +559,32 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     if (appMode === "hosted") {
       const request = beginHostedRequest();
 
-      void fetchHostedSnapshot(request.controller.signal)
-        .then((nextSnapshot) => {
+      void fetchHostedSync({
+        sinceRevision: null,
+        signal: request.controller.signal,
+      })
+        .then((response) => {
           finishHostedRequest(request.controller);
 
           if (cancelled) {
             return;
           }
 
-          applyHostedResponse(nextSnapshot, {
+          if (response.kind === "noop") {
+            applySnapshot(seedSnapshot);
+            storageHydratedRef.current = true;
+            return;
+          }
+
+          hostedSyncIntervalRef.current = response.syncIntervalMs;
+          applyHostedResponse(response.state, {
             requestId: request.requestId,
             sessionId: request.sessionId,
           });
+          if (response.kind === "bootstrap") {
+            setSelectedModelIdState(response.uiStateDefaults.selectedModelId);
+            setGallerySizeLevelState(response.uiStateDefaults.gallerySizeLevel);
+          }
           storageHydratedRef.current = true;
         })
         .catch(() => {
@@ -560,7 +603,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       };
     }
 
-    const nextSnapshot = loadStoredWorkspaceSnapshot(appMode) ?? seedSnapshot;
+    const nextSnapshot = loadStoredWorkspaceSnapshot() ?? seedSnapshot;
     const nextProviderSettings = loadStoredProviderSettings() ?? nextSnapshot.providerSettings;
 
     applySnapshot(nextSnapshot);
@@ -619,7 +662,6 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       creditBalance,
       draftsByModelId,
       folders,
-      folderItems,
       gallerySizeLevel,
       items,
       modelConfiguration,
@@ -631,13 +673,12 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       selectedModelId: visibleSelectedModelId,
     });
 
-    saveStoredWorkspaceSnapshot(appMode, snapshot);
+    saveStoredWorkspaceSnapshot(snapshot);
   }, [
     activeCreditPack,
     appMode,
     creditBalance,
     draftsByModelId,
-    folderItems,
     folders,
     gallerySizeLevel,
     items,
@@ -663,28 +704,51 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       return;
     }
 
-    const intervalId = window.setInterval(() => {
-      const request = beginHostedRequest();
+    let timeoutId = 0;
+    let cancelled = false;
 
-      void fetchHostedSnapshot(request.controller.signal)
-        .then((nextSnapshot) => {
-          finishHostedRequest(request.controller);
-          applyHostedResponse(nextSnapshot, {
-            preserveDrafts: true,
-            requestId: request.requestId,
-            sessionId: request.sessionId,
-          });
+    const scheduleNextSync = () => {
+      if (cancelled) {
+        return;
+      }
+
+      timeoutId = window.setTimeout(() => {
+        const request = beginHostedRequest();
+
+        void fetchHostedSync({
+          sinceRevision: hostedRevisionRef.current,
+          signal: request.controller.signal,
         })
-        .catch((error) => {
-          finishHostedRequest(request.controller);
-          if (error instanceof DOMException && error.name === "AbortError") {
-            return;
-          }
-          // Keep the last known hosted mock state if polling fails.
-        });
-    }, 1200);
+          .then((response) => {
+            finishHostedRequest(request.controller);
+            hostedSyncIntervalRef.current = response.syncIntervalMs;
 
-    return () => window.clearInterval(intervalId);
+            if (response.kind !== "noop") {
+              applyHostedResponse(response.state, {
+                requestId: request.requestId,
+                sessionId: request.sessionId,
+              });
+            }
+
+            scheduleNextSync();
+          })
+          .catch((error) => {
+            finishHostedRequest(request.controller);
+            if (error instanceof DOMException && error.name === "AbortError") {
+              return;
+            }
+            // Keep the last known hosted mock state if polling fails.
+            scheduleNextSync();
+          });
+      }, hostedSyncIntervalRef.current);
+    };
+
+    scheduleNextSync();
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
   }, [appMode, applyHostedResponse, beginHostedRequest, finishHostedRequest]);
 
   const scheduleDispatchAttempt = useCallback(
@@ -821,14 +885,6 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
           : null;
 
       setItems((current) => [nextItem, ...current]);
-      setFolderItems((current) => [
-        ...nextItem.folderIds.map((folderId) => ({
-          folderId,
-          libraryItemId: nextItem.id,
-          createdAt: completedAt,
-        })),
-        ...current,
-      ]);
 
       if (nextRunFile) {
         setRunFiles((current) => [nextRunFile, ...current]);
@@ -955,7 +1011,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   );
 
   const ungroupedItems = useMemo(
-    () => items.filter((item) => item.folderIds.length === 0),
+    () => items.filter((item) => item.folderId === null),
     [items]
   );
 
@@ -964,7 +1020,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       return [];
     }
 
-    return items.filter((item) => item.folderIds.includes(selectedFolderId));
+    return items.filter((item) => item.folderId === selectedFolderId);
   }, [items, selectedFolderId]);
 
   const ungroupedRunCards = useMemo(
@@ -996,8 +1052,8 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   }, [runs, selectedFolderId]);
 
   const folderCounts = useMemo(
-    () => createFolderItemCounts(folders, folderItems),
-    [folderItems, folders]
+    () => createFolderItemCounts(folders, items),
+    [folders, items]
   );
 
   const selectedItemIdSet = useMemo(
@@ -1014,16 +1070,15 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       const request = beginHostedRequest();
 
       try {
-        const nextSnapshot = await mutateHostedSnapshot(
+        const response = await mutateHostedSnapshot(
           mutation,
           request.controller.signal
         );
-        applyHostedResponse(nextSnapshot, {
-          preserveDrafts: true,
+        applyHostedResponse(response.state, {
           requestId: request.requestId,
           sessionId: request.sessionId,
         });
-        return nextSnapshot;
+        return response.state;
       } finally {
         finishHostedRequest(request.controller);
       }
@@ -1036,23 +1091,46 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       const request = beginHostedRequest();
 
       try {
-        const nextSnapshot = await uploadHostedFiles(
+        const response = await uploadHostedFiles(
           files,
           folderId,
           request.controller.signal
         );
-        applyHostedResponse(nextSnapshot, {
-          preserveDrafts: true,
+        applyHostedResponse(response.state, {
           requestId: request.requestId,
           sessionId: request.sessionId,
         });
-        return nextSnapshot;
+        return response.state;
       } finally {
         finishHostedRequest(request.controller);
       }
     },
     [applyHostedResponse, beginHostedRequest, finishHostedRequest]
   );
+
+  const refreshHostedState = useCallback(() => {
+    const request = beginHostedRequest();
+
+    void fetchHostedSync({
+      sinceRevision: null,
+      signal: request.controller.signal,
+    })
+      .then((response) => {
+        finishHostedRequest(request.controller);
+        if (response.kind === "noop") {
+          return;
+        }
+
+        hostedSyncIntervalRef.current = response.syncIntervalMs;
+        applyHostedResponse(response.state, {
+          requestId: request.requestId,
+          sessionId: request.sessionId,
+        });
+      })
+      .catch(() => {
+        finishHostedRequest(request.controller);
+      });
+  }, [applyHostedResponse, beginHostedRequest, finishHostedRequest]);
 
   const hostedAccount = useMemo(() => {
     if (appMode !== "hosted" || !creditBalance) {
@@ -1087,22 +1165,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
         void applyHostedMutation({
           action: "set_enabled_models",
           enabledModelIds: nextEnabledModelIds,
-        }).catch(() => {
-          const request = beginHostedRequest();
-
-          void fetchHostedSnapshot(request.controller.signal)
-            .then((nextSnapshot) => {
-              finishHostedRequest(request.controller);
-              applyHostedResponse(nextSnapshot, {
-                preserveDrafts: true,
-                requestId: request.requestId,
-                sessionId: request.sessionId,
-              });
-            })
-            .catch(() => {
-              finishHostedRequest(request.controller);
-            });
-        });
+        }).catch(refreshHostedState);
         return;
       }
 
@@ -1114,9 +1177,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     [
       appMode,
       applyHostedMutation,
-      applyHostedResponse,
-      beginHostedRequest,
-      finishHostedRequest,
+      refreshHostedState,
     ]
   );
 
@@ -1525,24 +1586,6 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
           : item
       )
     );
-
-    setFolderItems((current) => {
-      const remaining = current.filter(
-        (entry) => !itemIdSet.has(entry.libraryItemId)
-      );
-      if (!folderId) {
-        return remaining;
-      }
-
-      return [
-        ...itemIds.map((itemId) => ({
-          folderId,
-          libraryItemId: itemId,
-          createdAt: updatedAt,
-        })),
-        ...remaining,
-      ];
-    });
   }, [appMode, applyHostedMutation]);
 
   const deleteItems = useCallback((itemIds: string[]) => {
@@ -1575,9 +1618,6 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
         (runFile) =>
           !itemsToDelete.some((item) => item.runFileId && item.runFileId === runFile.id)
       )
-    );
-    setFolderItems((current) =>
-      current.filter((entry) => !itemIdSet.has(entry.libraryItemId))
     );
     setRuns((current) =>
       current.map((run) =>
@@ -1750,9 +1790,6 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
           sortOrder: index,
         }))
     );
-    setFolderItems((current) =>
-      current.filter((entry) => entry.folderId !== folderId)
-    );
     setItems((current) =>
       current.map((item) =>
         item.folderIds.includes(folderId)
@@ -1791,30 +1828,12 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       void applyHostedMutation({
         action: "reorder_folders",
         orderedFolderIds,
-      }).catch(() => {
-        const request = beginHostedRequest();
-
-        void fetchHostedSnapshot(request.controller.signal)
-          .then((nextSnapshot) => {
-            finishHostedRequest(request.controller);
-            applyHostedResponse(nextSnapshot, {
-              preserveDrafts: true,
-              requestId: request.requestId,
-              sessionId: request.sessionId,
-            });
-          })
-          .catch(() => {
-            finishHostedRequest(request.controller);
-            // Keep the optimistic folder order if the hosted mock refresh fails.
-          });
-      });
+      }).catch(refreshHostedState);
     },
     [
       appMode,
       applyHostedMutation,
-      applyHostedResponse,
-      beginHostedRequest,
-      finishHostedRequest,
+      refreshHostedState,
     ]
   );
 
@@ -2034,16 +2053,6 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       });
 
       setItems((current) => [nextItem, ...current]);
-      if (nextItem.folderId) {
-        setFolderItems((current) => [
-          {
-            folderId: nextItem.folderId!,
-            libraryItemId: nextItem.id,
-            createdAt: nextItem.createdAt,
-          },
-          ...current,
-        ]);
-      }
       setCreateTextSaving(false);
       setCreateTextDialogOpen(false);
       setCreateTextTitle("");
@@ -2138,17 +2147,9 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
 
         const nextItems = createdEntries.map((entry) => entry.item);
         const nextRunFiles = createdEntries.map((entry) => entry.runFile);
-        const nextFolderItems = nextItems.flatMap((item) =>
-          item.folderIds.map((folderId) => ({
-            folderId,
-            libraryItemId: item.id,
-            createdAt: item.createdAt,
-          }))
-        );
 
         setItems((current) => [...nextItems, ...current]);
         setRunFiles((current) => [...nextRunFiles, ...current]);
-        setFolderItems((current) => [...nextFolderItems, ...current]);
         setUploadDialogOpen(false);
       } finally {
         setUploadAssetsLoading(false);
@@ -2442,7 +2443,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     gallerySizeLevel,
     generate,
     getItemsForFolder: (folderId: string) =>
-      items.filter((item) => item.folderIds.includes(folderId)),
+      items.filter((item) => item.folderId === folderId),
     getPromptBarDropHint,
     hasFalKey,
     hostedAccount,

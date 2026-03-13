@@ -12,7 +12,6 @@ import type {
   DraftReference,
   LibraryItem,
   StudioFolder,
-  StudioFolderItem,
   StudioReferenceInputKind,
   StudioRunFile,
   StudioRunStatus,
@@ -50,12 +49,12 @@ export function releaseUploadedPreview(
 
 export function createFolderItemCounts(
   folders: StudioFolder[],
-  folderItems: StudioFolderItem[]
+  items: Pick<LibraryItem, "folderId">[]
 ) {
   return Object.fromEntries(
     folders.map((folder) => [
       folder.id,
-      folderItems.filter((entry) => entry.folderId === folder.id).length,
+      items.filter((item) => item.folderId === folder.id).length,
     ])
   ) as Record<string, number>;
 }

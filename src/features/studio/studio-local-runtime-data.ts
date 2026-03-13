@@ -21,7 +21,6 @@ import type {
   StudioCreditPack,
   StudioDraft,
   StudioFolder,
-  StudioFolderItem,
   StudioModelDefinition,
   StudioModelKind,
   StudioProfile,
@@ -34,7 +33,7 @@ export const LOCAL_STUDIO_WORKSPACE_ID = "workspace-local";
 export const HOSTED_STUDIO_WORKSPACE_ID = "workspace-hosted";
 export const LOCAL_STUDIO_USER_ID = "user-local";
 export const HOSTED_STUDIO_USER_ID = "user-hosted";
-export const STUDIO_STATE_SCHEMA_VERSION = 5;
+export const STUDIO_STATE_SCHEMA_VERSION = 6;
 
 const MOCK_MEDIA = {
   generatedImage: {
@@ -406,16 +405,6 @@ function createSeedFolders(mode: StudioAppMode): StudioFolder[] {
       sortOrder: 2,
     },
   ];
-}
-
-function createFolderMemberships(items: LibraryItem[]): StudioFolderItem[] {
-  return items.flatMap((item) =>
-    item.folderIds.map((folderId) => ({
-      folderId,
-      libraryItemId: item.id,
-      createdAt: item.createdAt,
-    }))
-  );
 }
 
 export function createRunFile(params: {
@@ -1396,7 +1385,6 @@ export function createStudioSeedSnapshot(mode: StudioAppMode): StudioWorkspaceSn
     },
     queueSettings: getDefaultQueueSettings(mode),
     folders,
-    folderItems: createFolderMemberships(items),
     runFiles,
     libraryItems: items,
     generationRuns: runs,

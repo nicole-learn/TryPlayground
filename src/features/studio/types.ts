@@ -150,12 +150,6 @@ export interface StudioFolder {
   sortOrder: number;
 }
 
-export interface StudioFolderItem {
-  folderId: string;
-  libraryItemId: string;
-  createdAt: string;
-}
-
 export interface StudioRunFile {
   id: string;
   runId: string | null;
@@ -327,7 +321,6 @@ export interface StudioWorkspaceDomainState {
   modelConfiguration: StudioModelConfiguration;
   queueSettings: StudioQueueSettings;
   folders: StudioFolder[];
-  folderItems: StudioFolderItem[];
   runFiles: StudioRunFile[];
   libraryItems: LibraryItem[];
   generationRuns: GenerationRun[];
@@ -345,4 +338,16 @@ export interface StudioWorkspaceSnapshot
     StudioWorkspaceUiState {
   schemaVersion: number;
   mode: "local" | "hosted";
+}
+
+export interface StudioHostedClientStateDefaults {
+  selectedModelId: string;
+  gallerySizeLevel: number;
+}
+
+export interface StudioHostedWorkspaceState extends StudioWorkspaceDomainState {
+  schemaVersion: number;
+  mode: "hosted";
+  revision: number;
+  syncedAt: string;
 }

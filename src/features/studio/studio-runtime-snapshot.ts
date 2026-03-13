@@ -8,12 +8,14 @@ import type {
   StudioCreditBalance,
   StudioCreditPack,
   StudioFolder,
-  StudioFolderItem,
+  StudioHostedClientStateDefaults,
+  StudioHostedWorkspaceState,
   StudioModelConfiguration,
   StudioProfile,
   StudioProviderSettings,
   StudioQueueSettings,
   StudioRunFile,
+  StudioWorkspaceDomainState,
   StudioWorkspaceSnapshot,
 } from "./types";
 
@@ -74,7 +76,6 @@ interface BuildStudioWorkspaceSnapshotParams {
   creditBalance: StudioCreditBalance | null;
   draftsByModelId: Record<string, PersistedStudioDraft>;
   folders: StudioFolder[];
-  folderItems: StudioFolderItem[];
   gallerySizeLevel: number;
   items: LibraryItem[];
   modelConfiguration: StudioModelConfiguration;
@@ -99,7 +100,6 @@ export function buildStudioWorkspaceSnapshot(
     modelConfiguration: params.modelConfiguration,
     queueSettings: params.queueSettings,
     folders: params.folders,
-    folderItems: params.folderItems,
     runFiles: params.runFiles,
     libraryItems: sanitizeItemsForWorkspaceSnapshot(params.items),
     generationRuns: params.runs,
@@ -107,4 +107,54 @@ export function buildStudioWorkspaceSnapshot(
     selectedModelId: params.selectedModelId,
     gallerySizeLevel: params.gallerySizeLevel,
   } satisfies StudioWorkspaceSnapshot;
+}
+
+export function extractStudioWorkspaceDomainState(
+  snapshot: Pick<
+    StudioWorkspaceSnapshot,
+    | "profile"
+    | "creditBalance"
+    | "activeCreditPack"
+    | "modelConfiguration"
+    | "queueSettings"
+    | "folders"
+    | "runFiles"
+    | "libraryItems"
+    | "generationRuns"
+  >
+) {
+  return {
+    profile: snapshot.profile,
+    creditBalance: snapshot.creditBalance,
+    activeCreditPack: snapshot.activeCreditPack,
+    modelConfiguration: snapshot.modelConfiguration,
+    queueSettings: snapshot.queueSettings,
+    folders: snapshot.folders,
+    runFiles: snapshot.runFiles,
+    libraryItems: sanitizeItemsForWorkspaceSnapshot(snapshot.libraryItems),
+    generationRuns: snapshot.generationRuns,
+  } satisfies StudioWorkspaceDomainState;
+}
+
+export function extractHostedClientStateDefaults(
+  snapshot: Pick<StudioWorkspaceSnapshot, "selectedModelId" | "gallerySizeLevel">
+) {
+  return {
+    selectedModelId: snapshot.selectedModelId,
+    gallerySizeLevel: snapshot.gallerySizeLevel,
+  } satisfies StudioHostedClientStateDefaults;
+}
+
+export function buildHostedWorkspaceState(params: {
+  domainState: StudioWorkspaceDomainState;
+  revision: number;
+  syncedAt: string;
+}) {
+  return {
+    schemaVersion: STUDIO_STATE_SCHEMA_VERSION,
+    mode: "hosted",
+    revision: params.revision,
+    syncedAt: params.syncedAt,
+    ...params.domainState,
+  } satisfies StudioHostedWorkspaceState;
 }
