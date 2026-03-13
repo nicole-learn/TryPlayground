@@ -122,6 +122,26 @@ function getRunStatusVisual(status: GenerationRun["status"]): CardStatusVisual {
   };
 }
 
+function getRunStatusDescription(run: GenerationRun) {
+  if (run.errorMessage) {
+    return run.errorMessage;
+  }
+
+  if (run.status === "processing") {
+    return "Generation in progress.";
+  }
+
+  if (run.status === "queued" || run.status === "pending") {
+    return "Waiting for an available generation slot.";
+  }
+
+  if (run.status === "cancelled") {
+    return "Generation stopped before completion.";
+  }
+
+  return "Generation did not complete.";
+}
+
 function getAssetStatusVisual(item: LibraryItem): CardStatusVisual | null {
   if (item.source !== "generated") {
     return null;
@@ -260,6 +280,7 @@ function AssetTile({
 }) {
   if (displayItem.type === "run") {
     const statusVisual = getRunStatusVisual(displayItem.run.status);
+    const statusDescription = getRunStatusDescription(displayItem.run);
 
     return (
       <div
@@ -274,50 +295,33 @@ function AssetTile({
         <span className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_top,rgba(0,0,0,0.54)_0%,rgba(0,0,0,0.28)_42%,rgba(0,0,0,0.12)_100%)]" />
 
         <div className="relative z-10 flex h-full flex-col justify-between p-3 text-white">
-          <div>
+          <div className="flex items-start justify-between gap-3">
             <StatusBadge
               className={statusVisual.badgeClassName}
               icon={statusVisual.icon}
               label={statusVisual.label}
               spinning={displayItem.run.status === "processing"}
             />
+            <span className="text-[10px] font-medium uppercase tracking-[0.16em] text-white/34">
+              {displayItem.run.kind}
+            </span>
           </div>
 
-          <div className="mt-auto">
+          <div className="mt-auto max-w-[24rem]">
             <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-white/62">
               {displayItem.run.modelName}
             </p>
             <p className="mt-1 line-clamp-3 text-[15px] leading-5 text-white">
               {displayItem.run.prompt}
             </p>
-            {displayItem.run.errorMessage ? (
-              <p className="mt-2 line-clamp-2 text-xs leading-4 text-red-100/88">
-                {displayItem.run.errorMessage}
-              </p>
-            ) : null}
-            {typeof displayItem.run.progressPercent === "number" ? (
-              <div className="mt-3 space-y-1.5">
-                <div className="h-1.5 overflow-hidden rounded-full bg-white/14">
-                  <div
-                    className={cn(
-                      "h-full rounded-full transition-[width] duration-300",
-                      displayItem.run.status === "failed"
-                        ? "bg-red-300/85"
-                        : "bg-primary"
-                    )}
-                    style={{
-                      width: `${Math.min(
-                        Math.max(displayItem.run.progressPercent, 0),
-                        100
-                      )}%`,
-                    }}
-                  />
-                </div>
-                <p className="text-[10px] uppercase tracking-[0.16em] text-white/48">
-                  {displayItem.run.progressPercent}% complete
-                </p>
-              </div>
-            ) : null}
+            <p
+              className={cn(
+                "mt-2 text-xs leading-4",
+                displayItem.run.errorMessage ? "line-clamp-2 text-red-100/88" : "text-white/44"
+              )}
+            >
+              {statusDescription}
+            </p>
           </div>
         </div>
       </div>
