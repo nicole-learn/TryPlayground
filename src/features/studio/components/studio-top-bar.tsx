@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { FileText, SquareMousePointer, Trash2, Upload } from "lucide-react";
+import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/cn";
 import type { StudioAppMode } from "../studio-app-mode";
 import { StudioAccountButton } from "./studio-account-button";
@@ -67,7 +68,6 @@ export function StudioTopBar({
   sizeLevel,
   onSizeLevelChange,
 }: StudioTopBarProps) {
-  const sliderProgressPct = (sizeLevel / 6) * 100;
   const selectionLabel =
     selectedItemCount > 0 ? `Delete ${selectedItemCount}` : "Selection Mode";
 
@@ -104,18 +104,14 @@ export function StudioTopBar({
           <Upload className="size-3.5" />
           <span>Upload Files</span>
         </ActionPillButton>
-        <input
-          type="range"
+        <Slider
           min={0}
           max={6}
           step={1}
-          value={sizeLevel}
-          onChange={(event) => onSizeLevelChange(Number(event.target.value))}
-          className="studio-range w-[150px]"
+          value={[sizeLevel]}
+          onValueChange={(value) => onSizeLevelChange(value[0] ?? sizeLevel)}
           aria-label="Gallery size"
-          style={{
-            background: `linear-gradient(90deg, color-mix(in srgb, var(--primary) 90%, white 10%) 0%, color-mix(in srgb, var(--primary) 90%, white 10%) ${sliderProgressPct}%, rgba(255,255,255,0.12) ${sliderProgressPct}%, rgba(255,255,255,0.12) 100%)`,
-          }}
+          className="w-[158px] cursor-grab [&_[data-slot=slider-range]]:bg-primary/80 [&_[data-slot=slider-thumb]]:size-[18px] [&_[data-slot=slider-thumb]]:border-0 [&_[data-slot=slider-thumb]]:bg-white [&_[data-slot=slider-thumb]]:hover:ring-0 [&_[data-slot=slider-thumb]]:shadow-[0_1px_8px_rgba(0,0,0,0.45)] [&_[data-slot=slider-track]]:bg-white/10"
         />
         <StudioAccountButton
           appMode={appMode}

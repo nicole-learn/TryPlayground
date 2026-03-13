@@ -191,47 +191,6 @@ body {
     animation: dot-blink 1s steps(1, end) infinite;
   }
 
-  .studio-range {
-    appearance: none;
-    height: 6px;
-    border-radius: 9999px;
-    background: color-mix(in srgb, white 12%, transparent);
-    outline: none;
-  }
-
-  .studio-range::-webkit-slider-runnable-track {
-    height: 6px;
-    border-radius: 9999px;
-    background: transparent;
-  }
-
-  .studio-range::-webkit-slider-thumb {
-    appearance: none;
-    margin-top: -6px;
-    height: 18px;
-    width: 18px;
-    border: 0;
-    border-radius: 9999px;
-    background: white;
-    box-shadow: 0 1px 8px rgba(0, 0, 0, 0.4);
-  }
-
-  .studio-range::-moz-range-track {
-    height: 6px;
-    border: 0;
-    border-radius: 9999px;
-    background: transparent;
-  }
-
-  .studio-range::-moz-range-thumb {
-    height: 18px;
-    width: 18px;
-    border: 0;
-    border-radius: 9999px;
-    background: white;
-    box-shadow: 0 1px 8px rgba(0, 0, 0, 0.4);
-  }
-
   .stable-scrollbar {
     scrollbar-gutter: stable;
     scrollbar-width: auto;

@@ -2,6 +2,7 @@
 
 import { FileText, FolderPlus, SquareMousePointer, Upload } from "lucide-react";
 import type { ReactNode } from "react";
+import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/cn";
 import type { StudioAppMode } from "../studio-app-mode";
 import type { StudioFolder } from "../types";
@@ -114,15 +115,15 @@ export function StudioMobileRail({
 
       <div className="flex w-full shrink-0 flex-col items-center gap-1 px-1.5 py-1.5">
         <div className="flex h-20 items-center justify-center">
-          <input
-            type="range"
+          <Slider
+            orientation="vertical"
             min={0}
             max={6}
             step={1}
-            value={sizeLevel}
-            onChange={(event) => onSizeLevelChange(Number(event.target.value))}
+            value={[sizeLevel]}
+            onValueChange={(value) => onSizeLevelChange(value[0] ?? sizeLevel)}
             aria-label="Gallery size"
-            className="w-20 -rotate-90 accent-primary"
+            className="!min-h-20 h-20 cursor-grab [&_[data-slot=slider-range]]:bg-primary/80 [&_[data-slot=slider-thumb]]:size-[18px] [&_[data-slot=slider-thumb]]:border-0 [&_[data-slot=slider-thumb]]:bg-white [&_[data-slot=slider-thumb]]:hover:ring-0 [&_[data-slot=slider-thumb]]:shadow-[0_1px_8px_rgba(0,0,0,0.45)] [&_[data-slot=slider-track]]:bg-white/10"
           />
         </div>
 

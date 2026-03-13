@@ -66,7 +66,7 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
   const [items, setItems] = useState(initialStudioState.items);
   const [runs, setRuns] = useState(initialStudioState.runs);
   const [draftsByModelId, setDraftsByModelId] = useState(buildStudioDraftMap);
-  const [gallerySizeLevel, setGallerySizeLevel] = useState(
+  const [gallerySizeLevel, setGallerySizeLevelState] = useState(
     () => loadStoredGridDensity() ?? 2
   );
   const [providerSettings, setProviderSettings] = useState<StudioProviderSettings>(
@@ -91,6 +91,11 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
   useEffect(() => {
     saveStoredGridDensity(gallerySizeLevel);
   }, [gallerySizeLevel]);
+
+  const setGallerySizeLevel = useCallback((value: number) => {
+    const nextValue = Math.min(Math.max(Math.round(value), 0), 6);
+    setGallerySizeLevelState(nextValue);
+  }, []);
 
   useEffect(() => {
     saveStoredProviderSettings(providerSettings);
