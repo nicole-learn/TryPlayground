@@ -24,11 +24,13 @@ interface StudioTopBarProps {
 function ActionPillButton({
   active = false,
   ariaLabel,
+  className,
   children,
   onClick,
 }: {
   active?: boolean;
   ariaLabel: string;
+  className?: string;
   children: ReactNode;
   onClick: () => void;
 }) {
@@ -39,10 +41,11 @@ function ActionPillButton({
       aria-label={ariaLabel}
       title={ariaLabel}
       className={cn(
-        "inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-[13px] font-medium tracking-tight transition-all duration-150 active:scale-[0.98]",
+        "inline-flex h-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full border px-4 text-[13px] font-medium tracking-tight transition-all duration-150 active:scale-[0.98]",
         active
           ? "border-primary/40 bg-primary/16 text-primary"
-          : "border-white/10 bg-white/[0.03] text-foreground/92 hover:bg-white/[0.06]"
+          : "border-white/10 bg-white/[0.03] text-foreground/92 hover:bg-white/[0.06]",
+        className
       )}
     >
       {children}
@@ -88,6 +91,7 @@ export function StudioTopBar({
         <ActionPillButton
           active={selectedItemCount === 0 && selectionModeEnabled}
           ariaLabel={selectedItemCount > 0 ? "Delete selected" : "Selection mode"}
+          className="min-w-[142px]"
           onClick={selectedItemCount > 0 ? onDeleteSelected : onToggleSelectionMode}
         >
           {selectedItemCount > 0 ? (
@@ -100,12 +104,20 @@ export function StudioTopBar({
           </span>
         </ActionPillButton>
 
-        <ActionPillButton ariaLabel="Add prompt" onClick={onOpenCreateText}>
+        <ActionPillButton
+          ariaLabel="Add prompt"
+          className="min-w-[124px]"
+          onClick={onOpenCreateText}
+        >
           <FileText className="size-3.5" />
           <span>Add Prompt</span>
         </ActionPillButton>
 
-        <ActionPillButton ariaLabel="Upload files" onClick={onOpenUpload}>
+        <ActionPillButton
+          ariaLabel="Upload files"
+          className="min-w-[128px]"
+          onClick={onOpenUpload}
+        >
           <Upload className="size-3.5" />
           <span>Upload Files</span>
         </ActionPillButton>
