@@ -1,8 +1,9 @@
 "use client";
 
-import { FolderPlus, MoreHorizontal, Trash2 } from "lucide-react";
+import { FolderPlus } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/cn";
+import { FolderOptionsMenu } from "./folder-options-menu";
 import {
   isStudioItemDrag,
   parseDraggedLibraryItemIds,
@@ -10,10 +11,13 @@ import {
 import type { StudioFolder } from "../types";
 
 interface FolderSidebarProps {
+  folderCounts: Record<string, number>;
   folders: StudioFolder[];
+  onCopyFolderId: (folderId: string) => void;
+  onRequestDeleteFolder: (folderId: string) => void;
   selectedFolderId: string | null;
   onCreateFolder: () => void;
-  onDeleteFolder: (folderId: string) => void;
+  onDownloadFolder: (folderId: string) => void;
   onDropItemsToFolder: (itemIds: string[], folderId: string | null) => void;
   onRenameFolder: (folderId: string) => void;
   onSelectFolder: (folderId: string | null) => void;
@@ -21,19 +25,27 @@ interface FolderSidebarProps {
 
 interface FolderRowProps {
   active: boolean;
+  hasItems: boolean;
   label: string;
+  onCopyFolderId: () => void;
   onClick: () => void;
-  onDelete?: () => void;
+  onDownloadFolder: () => void;
+  onOpenFolder: () => void;
   onDrop?: (itemIds: string[]) => void;
-  onRename?: () => void;
+  onRequestDelete: () => void;
+  onRename: () => void;
 }
 
 function FolderRow({
   active,
+  hasItems,
   label,
+  onCopyFolderId,
   onClick,
-  onDelete,
+  onDownloadFolder,
+  onOpenFolder,
   onDrop,
+  onRequestDelete,
   onRename,
 }: FolderRowProps) {
   const [dragOver, setDragOver] = useState(false);
@@ -70,7 +82,7 @@ function FolderRow({
           onDrop(parseDraggedLibraryItemIds(event.dataTransfer));
         }}
         className={cn(
-          "flex w-full items-center justify-between gap-3 rounded-xl px-4 py-3 text-left text-[15px] transition-all duration-150",
+          "flex w-full items-center justify-between gap-3 rounded-xl px-4 py-3 pr-12 text-left text-[15px] transition-all duration-150",
           active
             ? "bg-white/[0.11] font-medium text-foreground"
             : "bg-white/[0.05] text-foreground/84 hover:bg-white/[0.08] hover:text-foreground",
@@ -82,41 +94,28 @@ function FolderRow({
         <span className="truncate">{label}</span>
       </button>
 
-      {onRename || onDelete ? (
-        <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100">
-          {onRename ? (
-            <button
-              type="button"
-              onClick={onRename}
-              className="rounded-full p-1.5 text-muted-foreground transition hover:bg-white/[0.08] hover:text-foreground"
-              aria-label={`Rename ${label}`}
-              title="Rename folder"
-            >
-              <MoreHorizontal className="size-3.5" />
-            </button>
-          ) : null}
-          {onDelete ? (
-            <button
-              type="button"
-              onClick={onDelete}
-              className="rounded-full p-1.5 text-muted-foreground transition hover:bg-red-500/14 hover:text-red-200"
-              aria-label={`Delete ${label}`}
-              title="Delete folder"
-            >
-              <Trash2 className="size-3.5" />
-            </button>
-          ) : null}
-        </div>
-      ) : null}
+      <FolderOptionsMenu
+        className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100"
+        folderName={label}
+        hasItems={hasItems}
+        onCopyFolderId={onCopyFolderId}
+        onDeleteFolder={onRequestDelete}
+        onDownloadFolder={onDownloadFolder}
+        onOpenFolder={onOpenFolder}
+        onRenameFolder={onRename}
+      />
     </div>
   );
 }
 
 export function FolderSidebar({
+  folderCounts,
   folders,
+  onCopyFolderId,
+  onRequestDeleteFolder,
   selectedFolderId,
   onCreateFolder,
-  onDeleteFolder,
+  onDownloadFolder,
   onDropItemsToFolder,
   onRenameFolder,
   onSelectFolder,
@@ -129,12 +128,16 @@ export function FolderSidebar({
             <FolderRow
               key={folder.id}
               active={selectedFolderId === folder.id}
+              hasItems={(folderCounts[folder.id] ?? 0) > 0}
               label={folder.name}
+              onCopyFolderId={() => onCopyFolderId(folder.id)}
               onClick={() =>
                 onSelectFolder(selectedFolderId === folder.id ? null : folder.id)
               }
-              onDelete={() => onDeleteFolder(folder.id)}
+              onDownloadFolder={() => onDownloadFolder(folder.id)}
+              onOpenFolder={() => onSelectFolder(folder.id)}
               onDrop={(itemIds) => onDropItemsToFolder(itemIds, folder.id)}
+              onRequestDelete={() => onRequestDeleteFolder(folder.id)}
               onRename={() => onRenameFolder(folder.id)}
             />
           ))}

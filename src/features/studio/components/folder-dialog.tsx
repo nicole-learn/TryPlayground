@@ -21,18 +21,14 @@ export function FolderDialog({
   onClose,
   onSave,
 }: FolderDialogProps) {
-  const title = mode === "create" ? "Create Folder" : "Rename Folder";
-  const description =
-    mode === "create"
-      ? "Create a new folder to keep generations, uploads, and references organized."
-      : "Update the folder name without changing the items inside it.";
+  const title = mode === "create" ? "New Folder" : "Rename Folder";
 
   return (
     <ModalShell
       open={open}
       title={title}
-      description={description}
       onClose={onClose}
+      hideHeader
       panelClassName="w-[min(92vw,21rem)] max-w-sm overflow-hidden rounded-3xl"
       contentClassName="px-0 py-0"
     >
@@ -43,22 +39,25 @@ export function FolderDialog({
           onSave();
         }}
       >
-        <div className="px-6 py-5">
-          <label className="block">
-            <span className="mb-2 block text-sm font-medium text-white">
-              Folder name
-            </span>
+        <div className="px-5 pb-5 pt-6 text-center">
+          <h2 className="text-[17px] font-semibold tracking-tight text-foreground">
+            {title}
+          </h2>
+          <div className="mt-4 w-full space-y-3">
             <input
               value={value}
               onChange={(event) => onValueChange(event.target.value)}
-              placeholder="Campaign concepts"
-              className="h-10 w-full rounded-[8px] border-0 bg-foreground/5 px-3 text-[14px] font-medium text-foreground shadow-inner outline-none transition-colors placeholder:font-normal placeholder:text-muted-foreground/60 focus:bg-foreground/10"
+              placeholder="Folder name"
+              autoFocus
+              className="h-9 w-full rounded-[8px] border-0 bg-foreground/5 px-2.5 text-[14px] font-medium text-foreground shadow-inner outline-none transition-colors placeholder:font-normal placeholder:text-muted-foreground/60 focus:bg-foreground/10"
             />
-          </label>
 
-          {errorMessage ? (
-            <p className="mt-3 text-left text-[12px] text-destructive">{errorMessage}</p>
-          ) : null}
+            {errorMessage ? (
+              <p className="text-left text-[12px] text-destructive">
+                {errorMessage}
+              </p>
+            ) : null}
+          </div>
         </div>
 
         <div className="grid h-11 grid-cols-2 border-t border-white/10">

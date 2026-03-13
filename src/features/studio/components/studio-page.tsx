@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AssetDetailDialog } from "./asset-detail-dialog";
 import { CreateTextDialog } from "./create-text-dialog";
 import { FloatingControlBar } from "./floating-control-bar";
+import { FolderDeleteDialog } from "./folder-delete-dialog";
 import { FolderDialog } from "./folder-dialog";
 import { FolderSidebar } from "./folder-sidebar";
 import { HostedAccountDialog } from "./hosted-account-dialog";
@@ -15,6 +16,7 @@ import { StudioMobileRail } from "./studio-mobile-rail";
 import { StudioTopBar } from "./studio-top-bar";
 import { StudioWorkspaceShell } from "./studio-workspace-shell";
 import { useStudioAppMode } from "../studio-app-mode";
+import { downloadFolderItems, downloadLibraryItem } from "../studio-downloads";
 import { isStudioItemDrag } from "../studio-drag-data";
 import { STUDIO_MEDIA_UPLOAD_ACCEPT } from "../studio-local-runtime-helpers";
 import { useStudioRuntime } from "../use-studio-runtime";
@@ -24,24 +26,6 @@ const XL_BREAKPOINT_QUERY = "(min-width: 1280px)";
 
 interface StudioPageProps {
   hideDevModeToggle?: boolean;
-}
-
-function getDownloadFileName(item: LibraryItem) {
-  const safeBaseName = item.title.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-") || "asset";
-
-  if (item.kind === "text") {
-    return `${safeBaseName}.txt`;
-  }
-
-  if (item.kind === "video") {
-    return `${safeBaseName}.mp4`;
-  }
-
-  if (item.kind === "image") {
-    return `${safeBaseName}.png`;
-  }
-
-  return safeBaseName;
 }
 
 export function StudioPage({
@@ -56,6 +40,9 @@ export function StudioPage({
     return window.matchMedia(XL_BREAKPOINT_QUERY).matches;
   });
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
+  const [folderDeleteTargetId, setFolderDeleteTargetId] = useState<string | null>(
+    null
+  );
   const [hostedAccountOpen, setHostedAccountOpen] = useState(false);
   const [dragPreview, setDragPreview] = useState<{
     count: number;
@@ -133,6 +120,11 @@ export function StudioPage({
     () => studio.items.find((item) => item.id === activeItemId) ?? null,
     [activeItemId, studio.items]
   );
+  const folderDeleteTarget = useMemo(
+    () =>
+      studio.folders.find((folder) => folder.id === folderDeleteTargetId) ?? null,
+    [folderDeleteTargetId, studio.folders]
+  );
   const draggingItemIdSet = useMemo(
     () => new Set(dragPreview?.itemIds ?? []),
     [dragPreview]
@@ -154,31 +146,24 @@ export function StudioPage({
   };
 
   const downloadItem = (item: LibraryItem) => {
-    if (typeof window === "undefined") return;
+    downloadLibraryItem(item);
+  };
 
-    if (item.kind === "text") {
-      const blob = new Blob([item.contentText || item.prompt || item.title], {
-        type: "text/plain;charset=utf-8",
-      });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = getDownloadFileName(item);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  const downloadFolder = (folderId: string) => {
+    const folderItems = studio.items.filter((item) => item.folderId === folderId);
+    downloadFolderItems(folderItems);
+  };
+
+  const copyFolderId = async (folderId: string) => {
+    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
       return;
     }
 
-    if (!item.previewUrl) return;
-
-    const link = document.createElement("a");
-    link.href = item.previewUrl;
-    link.download = getDownloadFileName(item);
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+    try {
+      await navigator.clipboard.writeText(folderId);
+    } catch {
+      // Ignore clipboard failures in unsupported or restricted environments.
+    }
   };
 
   const handleItemDragStart = (params: {
@@ -320,10 +305,13 @@ export function StudioPage({
         secondaryPanel={secondaryGallery}
         rightSidebar={
           <FolderSidebar
+            folderCounts={studio.folderCounts}
             folders={studio.folders}
+            onCopyFolderId={copyFolderId}
+            onRequestDeleteFolder={setFolderDeleteTargetId}
             selectedFolderId={studio.selectedFolderId}
             onCreateFolder={studio.openCreateFolder}
-            onDeleteFolder={studio.deleteFolder}
+            onDownloadFolder={downloadFolder}
             onDropItemsToFolder={studio.moveItemsToFolder}
             onRenameFolder={studio.openRenameFolder}
             onSelectFolder={studio.setSelectedFolderId}
@@ -376,6 +364,17 @@ export function StudioPage({
         onValueChange={studio.setFolderEditorValue}
         onClose={() => studio.setFolderEditorOpen(false)}
         onSave={studio.saveFolder}
+      />
+
+      <FolderDeleteDialog
+        folderName={folderDeleteTarget?.name ?? "this folder"}
+        open={Boolean(folderDeleteTarget)}
+        onClose={() => setFolderDeleteTargetId(null)}
+        onDelete={() => {
+          if (!folderDeleteTargetId) return;
+          studio.deleteFolder(folderDeleteTargetId);
+          setFolderDeleteTargetId(null);
+        }}
       />
 
       <CreateTextDialog
