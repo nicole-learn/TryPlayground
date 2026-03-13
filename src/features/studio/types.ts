@@ -44,6 +44,7 @@ export interface StudioModelDefinition {
   heroGradient: string;
   tags: string[];
   requestMode: StudioGenerationRequestMode;
+  visibleInPromptBar?: boolean;
   requiresPrompt?: boolean;
   promptPlaceholder: string;
   supportsNegativePrompt: boolean;

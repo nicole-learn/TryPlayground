@@ -158,6 +158,7 @@ export const STUDIO_MODEL_CATALOG: StudioModelDefinition[] = [
     kind: "audio",
     section: "audio",
     requestMode: "text-to-speech",
+    visibleInPromptBar: false,
     description:
       "Expressive speech generation designed for more emotive, performance-style voice output.",
     heroGradient: "from-blue-300/25 via-indigo-300/10 to-transparent",
@@ -201,6 +202,7 @@ export const STUDIO_MODEL_CATALOG: StudioModelDefinition[] = [
     kind: "audio",
     section: "audio",
     requestMode: "text-to-speech",
+    visibleInPromptBar: false,
     description:
       "Dialogue-friendly speech synthesis with natural pacing for conversational reads and multi-turn delivery.",
     heroGradient: "from-sky-300/25 via-teal-300/10 to-transparent",
@@ -289,6 +291,10 @@ export const STUDIO_MODEL_SECTIONS = [
     description: "Text-to-speech models",
   },
 ] as const;
+
+export const STUDIO_VISIBLE_MODEL_CATALOG = STUDIO_MODEL_CATALOG.filter(
+  (model) => model.visibleInPromptBar !== false
+);
 
 export function getStudioModelById(modelId: string) {
   return (

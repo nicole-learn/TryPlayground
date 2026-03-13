@@ -57,6 +57,7 @@ import {
 import {
   STUDIO_MODEL_CATALOG,
   STUDIO_MODEL_SECTIONS,
+  STUDIO_VISIBLE_MODEL_CATALOG,
   getStudioModelById,
 } from "./studio-model-catalog";
 import type {
@@ -162,7 +163,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   const draftReferencesRef = useRef(createEmptyDraftReferenceMap());
   const runsRef = useRef(seedSnapshot.generationRuns);
 
-  const [models] = useState(STUDIO_MODEL_CATALOG);
+  const [models] = useState(STUDIO_VISIBLE_MODEL_CATALOG);
   const [profile, setProfile] = useState(seedSnapshot.profile);
   const [creditBalance, setCreditBalance] = useState(seedSnapshot.creditBalance);
   const [activeCreditPack, setActiveCreditPack] = useState(seedSnapshot.activeCreditPack);
@@ -237,6 +238,11 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   useEffect(() => {
     runsRef.current = runs;
   }, [runs]);
+
+  const visibleSelectedModelId =
+    models.find((model) => model.id === selectedModelId)?.id ??
+    models[0]?.id ??
+    selectedModelId;
 
   useEffect(() => {
     draftReferencesRef.current = draftReferencesByModelId;
@@ -393,7 +399,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       queueSettings,
       runFiles,
       runs,
-      selectedModelId,
+      selectedModelId: visibleSelectedModelId,
     });
 
     saveStoredWorkspaceSnapshot(appMode, snapshot);
@@ -411,7 +417,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     queueSettings,
     runFiles,
     runs,
-    selectedModelId,
+    visibleSelectedModelId,
   ]);
 
   useEffect(() => {
@@ -681,8 +687,8 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   }, [appMode, clearAllTimers, runs, scheduleDispatchAttempt, scheduleRunCompletion]);
 
   const selectedModel = useMemo(
-    () => models.find((model) => model.id === selectedModelId) ?? models[0],
-    [models, selectedModelId]
+    () => models.find((model) => model.id === visibleSelectedModelId) ?? models[0],
+    [models, visibleSelectedModelId]
   );
 
   const currentDraft = useMemo(() => {
@@ -1882,7 +1888,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     selectedItemCount,
     selectedItemIdSet,
     selectedModel,
-    selectedModelId,
+    selectedModelId: visibleSelectedModelId,
     selectionModeEnabled,
     setGallerySizeLevel,
     setProviderSettingsOpen,
