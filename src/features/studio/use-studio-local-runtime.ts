@@ -95,6 +95,9 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
   const [createTextBody, setCreateTextBody] = useState("");
   const [createTextSaving, setCreateTextSaving] = useState(false);
   const [createTextErrorMessage, setCreateTextErrorMessage] = useState<string | null>(null);
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [uploadDialogFolderId, setUploadDialogFolderId] = useState<string | null>(null);
+  const [uploadAssetsLoading, setUploadAssetsLoading] = useState(false);
 
   useEffect(() => {
     draftsByModelIdRef.current = draftsByModelId;
@@ -676,26 +679,38 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
   );
 
   const uploadFiles = useCallback(
-    (files: File[]) => {
+    async (files: File[], folderIdOverride?: string | null) => {
       if (files.length === 0) return;
 
-      const nextItems = files
-        .map((file) => createUploadedLibraryItem(file, selectedFolderId))
-        .filter((item): item is LibraryItem => Boolean(item));
-
-      if (nextItems.length === 0) {
+      if (uploadAssetsLoading) {
         return;
       }
 
-      for (const item of nextItems) {
-        if (item.previewUrl) {
-          previewUrlsRef.current.set(item.id, item.previewUrl);
-        }
-      }
+      setUploadAssetsLoading(true);
+      try {
+        const nextItems = files
+          .map((file) =>
+            createUploadedLibraryItem(file, folderIdOverride ?? selectedFolderId)
+          )
+          .filter((item): item is LibraryItem => Boolean(item));
 
-      setItems((current) => [...nextItems, ...current]);
+        if (nextItems.length === 0) {
+          return;
+        }
+
+        for (const item of nextItems) {
+          if (item.previewUrl) {
+            previewUrlsRef.current.set(item.id, item.previewUrl);
+          }
+        }
+
+        setItems((current) => [...nextItems, ...current]);
+        setUploadDialogOpen(false);
+      } finally {
+        setUploadAssetsLoading(false);
+      }
     },
-    [selectedFolderId]
+    [selectedFolderId, uploadAssetsLoading]
   );
 
   const saveProviderSettings = useCallback(
@@ -734,6 +749,27 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
   const updateCreateTextBody = useCallback((value: string) => {
     setCreateTextBody(value);
     setCreateTextErrorMessage(null);
+  }, []);
+
+  const openUploadDialog = useCallback(() => {
+    if (uploadAssetsLoading) {
+      return;
+    }
+
+    setUploadDialogFolderId(selectedFolderId);
+    setUploadDialogOpen(true);
+  }, [selectedFolderId, uploadAssetsLoading]);
+
+  const closeUploadDialog = useCallback(() => {
+    if (uploadAssetsLoading) {
+      return;
+    }
+
+    setUploadDialogOpen(false);
+  }, [uploadAssetsLoading]);
+
+  const toggleUploadDialogFolder = useCallback((folderId: string) => {
+    setUploadDialogFolderId((current) => (current === folderId ? null : folderId));
   }, []);
 
   const createTextAsset = useCallback(async () => {
@@ -914,6 +950,7 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
     modelSections: STUDIO_MODEL_SECTIONS,
     models,
     moveItemsToFolder,
+    openUploadDialog,
     openCreateFolder,
     openCreateTextComposer,
     openRenameFolder,
@@ -935,6 +972,11 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
     selectedModelId,
     selectionModeEnabled,
     closeCreateTextComposer,
+    closeUploadDialog,
+    toggleUploadDialogFolder,
+    uploadAssetsLoading,
+    uploadDialogFolderId,
+    uploadDialogOpen,
     updateCreateTextBody,
     updateCreateTextTitle,
     setFolderEditorOpen,

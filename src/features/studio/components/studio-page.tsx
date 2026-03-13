@@ -14,11 +14,11 @@ import { StudioDragPreviewOverlay } from "./studio-drag-preview-overlay";
 import { StudioGallery } from "./studio-gallery";
 import { StudioMobileRail } from "./studio-mobile-rail";
 import { StudioTopBar } from "./studio-top-bar";
+import { UploadFilesDialog } from "./upload-files-dialog";
 import { StudioWorkspaceShell } from "./studio-workspace-shell";
 import { useStudioAppMode } from "../studio-app-mode";
 import { downloadFolderItems, downloadLibraryItem } from "../studio-downloads";
 import { isStudioItemDrag } from "../studio-drag-data";
-import { STUDIO_MEDIA_UPLOAD_ACCEPT } from "../studio-local-runtime-helpers";
 import { useStudioRuntime } from "../use-studio-runtime";
 import type { LibraryItem } from "../types";
 
@@ -31,7 +31,6 @@ interface StudioPageProps {
 export function StudioPage({
   hideDevModeToggle = false,
 }: StudioPageProps) {
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const emptyDragImageRef = useRef<HTMLDivElement | null>(null);
   const { appMode, canSwitchModes, setAppMode } = useStudioAppMode();
   const studio = useStudioRuntime(appMode);
@@ -234,7 +233,7 @@ export function StudioPage({
         }
         studio.deleteItem(itemId);
       }}
-      onEmptyStateAction={() => fileInputRef.current?.click()}
+      onEmptyStateAction={studio.openUploadDialog}
       onItemDragEnd={() => setDragPreview(null)}
       onItemDragStart={handleItemDragStart}
       onMoveDraggedItems={(itemIds) => studio.moveItemsToFolder(itemIds, null)}
@@ -262,7 +261,7 @@ export function StudioPage({
         }
         studio.deleteItem(itemId);
       }}
-      onEmptyStateAction={() => fileInputRef.current?.click()}
+      onEmptyStateAction={studio.openUploadDialog}
       onItemDragEnd={() => setDragPreview(null)}
       onItemDragStart={handleItemDragStart}
       onMoveDraggedItems={(itemIds) =>
@@ -276,17 +275,6 @@ export function StudioPage({
 
   return (
     <>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept={STUDIO_MEDIA_UPLOAD_ACCEPT}
-        multiple
-        className="hidden"
-        onChange={(event) => {
-          studio.uploadFiles(Array.from(event.target.files ?? []));
-          event.target.value = "";
-        }}
-      />
       <div
         ref={emptyDragImageRef}
         aria-hidden
@@ -325,7 +313,7 @@ export function StudioPage({
             onCreateFolder={studio.openCreateFolder}
             onOpenCreateText={studio.openCreateTextComposer}
             onOpenAccount={openAccountSurface}
-            onOpenUpload={() => fileInputRef.current?.click()}
+            onOpenUpload={studio.openUploadDialog}
             onSelectFolder={studio.setSelectedFolderId}
             onSizeLevelChange={studio.setGallerySizeLevel}
             onToggleSelectionMode={studio.toggleSelectionMode}
@@ -357,7 +345,7 @@ export function StudioPage({
             onDownloadSelected={downloadSelectedItems}
             onOpenCreateText={studio.openCreateTextComposer}
             onOpenAccount={openAccountSurface}
-            onOpenUpload={() => fileInputRef.current?.click()}
+            onOpenUpload={studio.openUploadDialog}
             onSizeLevelChange={studio.setGallerySizeLevel}
             onToggleSelectionMode={studio.toggleSelectionMode}
             selectedItemCount={studio.selectedItemCount}
@@ -420,6 +408,16 @@ export function StudioPage({
         onBodyChange={studio.updateCreateTextBody}
         onClose={studio.closeCreateTextComposer}
         onSubmit={studio.createTextAsset}
+      />
+
+      <UploadFilesDialog
+        folders={studio.folders}
+        loading={studio.uploadAssetsLoading}
+        open={studio.uploadDialogOpen}
+        selectedFolderId={studio.uploadDialogFolderId}
+        onChooseFiles={(files) => studio.uploadFiles(files, studio.uploadDialogFolderId)}
+        onClose={studio.closeUploadDialog}
+        onToggleFolder={studio.toggleUploadDialogFolder}
       />
 
       <AssetDetailDialog
