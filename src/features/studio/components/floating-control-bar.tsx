@@ -15,7 +15,6 @@ import type { StudioDraft, StudioModelDefinition, StudioModelSection } from "../
 
 interface FloatingControlBarProps {
   draft: StudioDraft;
-  hasFalKey: boolean;
   model: StudioModelDefinition;
   models: StudioModelDefinition[];
   sections: ReadonlyArray<{
@@ -210,7 +209,6 @@ function AddReferenceButton({
 
 export function FloatingControlBar({
   draft,
-  hasFalKey,
   model,
   models,
   sections,
@@ -222,7 +220,7 @@ export function FloatingControlBar({
   onUpdateDraft,
 }: FloatingControlBarProps) {
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
-  const canGenerate = draft.prompt.trim().length > 0 && hasFalKey;
+  const canGenerate = draft.prompt.trim().length > 0;
 
   useEffect(() => {
     const textarea = promptRef.current;
@@ -421,12 +419,6 @@ export function FloatingControlBar({
             </div>
 
             <div className="flex shrink-0 items-end gap-2 p-3">
-              {!hasFalKey ? (
-                <div className="max-w-44 self-center text-right text-xs text-amber-300/90">
-                  Add your Fal key to generate.
-                </div>
-              ) : null}
-
               <button
                 type="button"
                 disabled={!canGenerate}

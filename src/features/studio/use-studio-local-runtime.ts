@@ -462,7 +462,12 @@ export function useStudioLocalRuntime() {
   }, [closeCreateTextComposer, createTextBody, createTextTitle, selectedFolderId]);
 
   const generate = useCallback(() => {
-    if (!currentDraft.prompt.trim() || !hasFalKey) {
+    if (!currentDraft.prompt.trim()) {
+      return;
+    }
+
+    if (!hasFalKey) {
+      setProviderSettingsOpen(true);
       return;
     }
 

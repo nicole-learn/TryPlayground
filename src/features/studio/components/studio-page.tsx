@@ -153,7 +153,6 @@ export function StudioPage() {
         floatingOverlay={
           <FloatingControlBar
             draft={studio.currentDraft}
-            hasFalKey={studio.hasFalKey}
             model={studio.selectedModel}
             models={studio.models}
             sections={studio.modelSections}
