@@ -130,11 +130,11 @@ function getRunStatusDescription(run: GenerationRun) {
   }
 
   if (run.status === "processing") {
-    return "Generation in progress.";
+    return null;
   }
 
   if (run.status === "queued" || run.status === "pending") {
-    return "Waiting for an available generation slot.";
+    return null;
   }
 
   if (run.status === "cancelled") {
@@ -328,14 +328,16 @@ function AssetTile({
             <p className="mt-1 line-clamp-3 text-[15px] leading-5 text-white">
               {displayItem.run.prompt}
             </p>
-            <p
-              className={cn(
-                "mt-2 text-xs leading-4",
-                displayItem.run.errorMessage ? "line-clamp-2 text-red-100/88" : "text-white/44"
-              )}
-            >
-              {statusDescription}
-            </p>
+            {statusDescription ? (
+              <p
+                className={cn(
+                  "mt-2 text-xs leading-4",
+                  displayItem.run.errorMessage ? "line-clamp-2 text-red-100/88" : "text-white/44"
+                )}
+              >
+                {statusDescription}
+              </p>
+            ) : null}
           </div>
         </div>
       </div>
