@@ -1,7 +1,9 @@
 import type {
+  DraftReferenceSource,
   GenerationRun,
   LibraryItemKind,
   PersistedStudioDraft,
+  StudioReferenceInputKind,
   StudioCreditPurchaseAmount,
   StudioHostedClientStateDefaults,
   StudioHostedWorkspaceState,
@@ -41,6 +43,16 @@ export interface HostedStudioUploadManifestEntry {
   hasAlpha: boolean;
 }
 
+export interface HostedStudioGenerateInputDescriptor {
+  slot: "reference" | "start_frame" | "end_frame";
+  uploadField: string | null;
+  originAssetId: string | null;
+  title: string;
+  kind: StudioReferenceInputKind;
+  mimeType: string | null;
+  source: DraftReferenceSource;
+}
+
 export type HostedStudioMutation =
   | {
       action: "purchase_credits";
@@ -49,6 +61,11 @@ export type HostedStudioMutation =
   | {
       action: "set_enabled_models";
       enabledModelIds: string[];
+    }
+  | {
+      action: "save_ui_state";
+      selectedModelId: string;
+      gallerySizeLevel: number;
     }
   | {
       action: "sign_out";

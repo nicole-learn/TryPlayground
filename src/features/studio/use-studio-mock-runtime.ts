@@ -44,6 +44,10 @@ import {
   STUDIO_MODEL_SECTIONS,
   getStudioModelById,
 } from "./studio-model-catalog";
+import {
+  ensureHostedAccessToken,
+  signOutHostedSession,
+} from "./studio-hosted-session";
 import type {
   LocalStudioMutation,
   LocalStudioSnapshotResponse,
@@ -51,6 +55,7 @@ import type {
   LocalStudioUploadManifestEntry,
 } from "./studio-local-api";
 import type {
+  HostedStudioGenerateInputDescriptor,
   HostedStudioMutation,
   HostedStudioMutationResponse,
   HostedStudioSyncResponse,
@@ -59,6 +64,7 @@ import type {
 import { getStudioUploadedMediaKind, studioUploadSupportsAlpha } from "./studio-upload-files";
 import type {
   DraftReference,
+  GenerationRun,
   LibraryItem,
   PersistedStudioDraft,
   StudioCreditPurchaseAmount,
@@ -97,6 +103,40 @@ function createEmptyDraftFrameMap() {
       { startFrame: null, endFrame: null } satisfies DraftFrameInputs,
     ])
   ) as Record<string, DraftFrameInputs>;
+}
+
+async function fetchHostedWithSession(
+  input: RequestInfo | URL,
+  init?: RequestInit
+) {
+  const accessToken = await ensureHostedAccessToken();
+  const headers = new Headers(init?.headers);
+  headers.set("Authorization", `Bearer ${accessToken}`);
+
+  let response = await fetch(input, {
+    ...init,
+    headers,
+    cache: "no-store",
+    credentials: "same-origin",
+  });
+
+  if (response.status !== 401) {
+    return response;
+  }
+
+  await signOutHostedSession().catch(() => undefined);
+  const retryAccessToken = await ensureHostedAccessToken();
+  const retryHeaders = new Headers(init?.headers);
+  retryHeaders.set("Authorization", `Bearer ${retryAccessToken}`);
+
+  response = await fetch(input, {
+    ...init,
+    headers: retryHeaders,
+    cache: "no-store",
+    credentials: "same-origin",
+  });
+
+  return response;
 }
 
 async function fetchLocalBootstrap(signal?: AbortSignal) {
@@ -249,13 +289,8 @@ async function fetchHostedSync(params: {
     searchParams.set("sinceRevision", String(params.sinceRevision));
   }
 
-  const response = await fetch(`/api/mock/studio/hosted?${searchParams.toString()}`, {
+  const response = await fetchHostedWithSession(`/api/studio/hosted/sync?${searchParams.toString()}`, {
     method: "GET",
-    cache: "no-store",
-    credentials: "same-origin",
-    headers: {
-      "x-tryplayground-mock-client": "hosted",
-    },
     signal: params.signal,
   });
   const payload = (await response.json()) as HostedStudioSyncResponse & {
@@ -263,7 +298,7 @@ async function fetchHostedSync(params: {
   };
 
   if (!response.ok) {
-    throw new Error(payload.error ?? "Could not load hosted mock state.");
+    throw new Error(payload.error ?? "Could not load hosted workspace.");
   }
 
   return payload;
@@ -273,15 +308,12 @@ async function mutateHostedSnapshot(
   mutation: HostedStudioMutation,
   signal?: AbortSignal
 ) {
-  const response = await fetch("/api/mock/studio/hosted", {
+  const response = await fetchHostedWithSession("/api/studio/hosted/mutate", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-tryplayground-mock-client": "hosted",
     },
     body: JSON.stringify(mutation),
-    cache: "no-store",
-    credentials: "same-origin",
     signal,
   });
   const payload = (await response.json()) as HostedStudioMutationResponse & {
@@ -289,7 +321,7 @@ async function mutateHostedSnapshot(
   };
 
   if (!response.ok) {
-    throw new Error(payload.error ?? "Hosted mock mutation failed.");
+    throw new Error(payload.error ?? "Hosted workspace mutation failed.");
   }
 
   return payload;
@@ -350,14 +382,9 @@ async function uploadHostedFiles(
     formData.append("files", file);
   }
 
-  const response = await fetch("/api/mock/studio/hosted/uploads", {
+  const response = await fetchHostedWithSession("/api/studio/hosted/uploads", {
     method: "POST",
     body: formData,
-    cache: "no-store",
-    credentials: "same-origin",
-    headers: {
-      "x-tryplayground-mock-client": "hosted",
-    },
     signal,
   });
   const payload = (await response.json()) as HostedStudioMutationResponse & {
@@ -365,10 +392,58 @@ async function uploadHostedFiles(
   };
 
   if (!response.ok) {
-    throw new Error(payload.error ?? "Hosted mock upload failed.");
+    throw new Error(payload.error ?? "Hosted upload failed.");
   }
 
   return payload;
+}
+
+async function queueHostedGeneration(params: {
+  modelId: string;
+  folderId: string | null;
+  draft: GenerationRun["draftSnapshot"] | PersistedStudioDraft;
+  inputs: HostedStudioGenerateInputDescriptor[];
+  filesByField: Map<string, File>;
+  signal?: AbortSignal;
+}) {
+  const formData = new FormData();
+  formData.set("modelId", params.modelId);
+  if (params.folderId) {
+    formData.set("folderId", params.folderId);
+  }
+  formData.set("draft", JSON.stringify(params.draft));
+  formData.set("inputs", JSON.stringify(params.inputs));
+
+  for (const [field, file] of params.filesByField.entries()) {
+    formData.append(`input-file:${field}`, file);
+  }
+
+  const response = await fetchHostedWithSession("/api/studio/hosted/generate", {
+    method: "POST",
+    body: formData,
+    signal: params.signal,
+  });
+  const payload = (await response.json()) as HostedStudioMutationResponse & {
+    error?: string;
+  };
+
+  if (!response.ok) {
+    throw new Error(payload.error ?? "Hosted generation could not be queued.");
+  }
+
+  return payload;
+}
+
+async function deleteHostedAccountRequest(signal?: AbortSignal) {
+  const response = await fetchHostedWithSession("/api/studio/hosted/account", {
+    method: "DELETE",
+    signal,
+  });
+  const payload = (await response.json()) as { error?: string; ok?: boolean };
+
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.error ?? "Could not delete your hosted account.");
+  }
 }
 
 async function validateFalApiKey(falApiKey: string) {
@@ -470,6 +545,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   const [uploadAssetsLoading, setUploadAssetsLoading] = useState(false);
   const [queueLimitDialogOpen, setQueueLimitDialogOpen] = useState(false);
   const [purchaseCreditsPending, setPurchaseCreditsPending] = useState(false);
+  const [hostedSetupMessage, setHostedSetupMessage] = useState<string | null>(null);
   const normalizedEnabledModelIds = useMemo(
     () => normalizeStudioEnabledModelIds(modelConfiguration.enabledModelIds),
     [modelConfiguration.enabledModelIds]
@@ -731,6 +807,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       setUploadDialogOpen(false);
       setUploadDialogFolderId(null);
       setQueueLimitDialogOpen(false);
+      setHostedSetupMessage(null);
       setDraftReferencesByModelId(createEmptyDraftReferenceMap());
       setDraftFramesByModelId(createEmptyDraftFrameMap());
     };
@@ -751,6 +828,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
             return;
           }
 
+          setHostedSetupMessage(null);
           if (response.kind === "noop") {
             applySnapshot(seedSnapshot);
             storageHydratedRef.current = true;
@@ -768,13 +846,18 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
           }
           storageHydratedRef.current = true;
         })
-        .catch(() => {
+        .catch((error) => {
           finishHostedRequest(request.controller);
 
           if (cancelled) {
             return;
           }
 
+          setHostedSetupMessage(
+            error instanceof Error
+              ? error.message
+              : "Hosted setup is incomplete."
+          );
           applySnapshot(seedSnapshot);
           storageHydratedRef.current = true;
         });
@@ -891,6 +974,56 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     applyLocalResponse,
     beginLocalRequest,
     finishLocalRequest,
+  ]);
+
+  useEffect(() => {
+    if (!storageHydratedRef.current || appMode !== "hosted") {
+      return;
+    }
+
+    let cancelled = false;
+    const timeoutId = window.setTimeout(() => {
+      const request = beginHostedRequest();
+
+      void mutateHostedSnapshot(
+        {
+          action: "save_ui_state",
+          selectedModelId: visibleSelectedModelId,
+          gallerySizeLevel,
+        },
+        request.controller.signal
+      )
+        .then((response) => {
+          finishHostedRequest(request.controller);
+
+          if (cancelled) {
+            return;
+          }
+
+          applyHostedResponse(response.state, {
+            requestId: request.requestId,
+            sessionId: request.sessionId,
+          });
+        })
+        .catch((error) => {
+          finishHostedRequest(request.controller);
+          if (error instanceof DOMException && error.name === "AbortError") {
+            return;
+          }
+        });
+    }, 220);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    appMode,
+    gallerySizeLevel,
+    visibleSelectedModelId,
+    applyHostedResponse,
+    beginHostedRequest,
+    finishHostedRequest,
   ]);
 
   useEffect(() => {
@@ -1243,9 +1376,9 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       generatingCount: runs.filter((run) => run.status === "processing").length,
       completedCount: runs.filter((run) => run.status === "completed").length,
       pricingSummary: "Fal market rate + 15%",
-      environmentLabel: "Hosted preview",
+      environmentLabel: hostedSetupMessage ?? "Hosted preview",
     } satisfies StudioHostedAccount;
-  }, [activeCreditPack, appMode, creditBalance, profile, runs]);
+  }, [activeCreditPack, appMode, creditBalance, hostedSetupMessage, profile, runs]);
 
   const accountButtonLabel =
     appMode === "hosted" ? profile.avatarLabel || "U" : "T";
@@ -2238,27 +2371,77 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     }
   }, [appMode, applyHostedMutation]);
 
+  const buildHostedGenerationPayload = useCallback(() => {
+    const inputs: HostedStudioGenerateInputDescriptor[] = [];
+    const filesByField = new Map<string, File>();
+    let nextUploadIndex = 0;
+
+    const appendInput = (
+      slot: HostedStudioGenerateInputDescriptor["slot"],
+      reference: DraftReference | null
+    ) => {
+      if (!reference) {
+        return;
+      }
+
+      const uploadField =
+        reference.originAssetId === null ? `upload-${nextUploadIndex++}` : null;
+
+      if (uploadField) {
+        filesByField.set(uploadField, reference.file);
+      }
+
+      inputs.push({
+        slot,
+        uploadField,
+        originAssetId: reference.originAssetId,
+        title: reference.title,
+        kind: reference.kind,
+        mimeType: reference.mimeType,
+        source: reference.source,
+      });
+    };
+
+    for (const reference of currentDraft.references) {
+      appendInput("reference", reference);
+    }
+
+    appendInput("start_frame", currentDraft.startFrame);
+    appendInput("end_frame", currentDraft.endFrame);
+
+    return {
+      inputs,
+      filesByField,
+    };
+  }, [currentDraft.endFrame, currentDraft.references, currentDraft.startFrame]);
+
   const signOutHostedAccount = useCallback(async () => {
     if (appMode !== "hosted") {
       return;
     }
 
-    await applyHostedMutation({
-      action: "sign_out",
-    });
+    await signOutHostedSession();
     setSettingsDialogOpen(false);
-  }, [appMode, applyHostedMutation]);
+    window.location.reload();
+  }, [appMode]);
 
   const deleteHostedAccount = useCallback(async () => {
     if (appMode !== "hosted") {
       return;
     }
 
-    await applyHostedMutation({
-      action: "delete_account",
-    });
+    const request = beginHostedRequest();
+
+    try {
+      await deleteHostedAccountRequest(request.controller.signal);
+      await signOutHostedSession().catch(() => undefined);
+    } finally {
+      finishHostedRequest(request.controller);
+    }
+
     setSettingsDialogOpen(false);
-  }, [appMode, applyHostedMutation]);
+    window.location.reload();
+  }, [appMode, beginHostedRequest, finishHostedRequest]);
 
   const setGallerySizeLevel = useCallback((value: number) => {
     const nextValue = Math.min(Math.max(Math.round(value), 0), 6);
@@ -2280,20 +2463,34 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     }
 
     if (appMode === "hosted") {
-      void applyHostedMutation({
-        action: "generate",
+      const hostedGenerationPayload = buildHostedGenerationPayload();
+      const request = beginHostedRequest();
+
+      void queueHostedGeneration({
         modelId: selectedModel.id,
         folderId: selectedFolderId,
         draft: createDraftSnapshot(currentDraft),
-      }).catch((error) => {
-        if (
-          error instanceof Error &&
-          error.message ===
-            "limit of 100 concurrent queues/ generations reached, please wait for your generations to finish before continuing."
-        ) {
-          setQueueLimitDialogOpen(true);
-        }
-      });
+        inputs: hostedGenerationPayload.inputs,
+        filesByField: hostedGenerationPayload.filesByField,
+        signal: request.controller.signal,
+      })
+        .then((response) => {
+          finishHostedRequest(request.controller);
+          applyHostedResponse(response.state, {
+            requestId: request.requestId,
+            sessionId: request.sessionId,
+          });
+        })
+        .catch((error) => {
+          finishHostedRequest(request.controller);
+          if (
+            error instanceof Error &&
+            error.message ===
+              "limit of 100 concurrent queues/ generations reached, please wait for your generations to finish before continuing."
+          ) {
+            setQueueLimitDialogOpen(true);
+          }
+        });
       return;
     }
 
@@ -2320,8 +2517,11 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   }, [
     appMode,
     applyLocalMutation,
-    applyHostedMutation,
+    applyHostedResponse,
+    beginHostedRequest,
+    buildHostedGenerationPayload,
     currentDraft,
+    finishHostedRequest,
     hasFalKey,
     refreshLocalState,
     selectedFolderId,

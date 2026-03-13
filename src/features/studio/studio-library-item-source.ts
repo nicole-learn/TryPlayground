@@ -83,8 +83,8 @@ export function getLibraryItemSourceUrl(
     return item.previewUrl;
   }
 
-  if (item.storageBucket === "mock-api" && item.storagePath) {
-    return `/api/mock/studio/hosted/files/${encodeURIComponent(item.storagePath)}`;
+  if (item.storageBucket === "hosted-media" && item.storagePath) {
+    return `/api/studio/hosted/files/${encodeURIComponent(item.storagePath)}`;
   }
 
   if (item.storagePath?.trim()) {
