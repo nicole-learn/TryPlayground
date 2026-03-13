@@ -79,6 +79,10 @@ export function getLibraryItemSourceUrl(
     return null;
   }
 
+  if (item.storageBucket === "local-fs") {
+    return item.previewUrl;
+  }
+
   if (item.storageBucket === "mock-api" && item.storagePath) {
     return `/api/mock/studio/hosted/files/${encodeURIComponent(item.storagePath)}`;
   }

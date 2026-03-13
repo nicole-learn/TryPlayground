@@ -4,19 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StudioAppMode } from "./studio-app-mode";
 import { readUploadedAssetMediaMetadata } from "./studio-asset-metadata";
 import {
-  deleteUploadedAssetFile,
   loadStoredProviderSettings,
-  loadStoredWorkspaceSnapshot,
   saveStoredProviderSettings,
-  saveStoredWorkspaceSnapshot,
-  saveUploadedAssetFile,
 } from "./studio-browser-storage";
 import {
   canGenerateWithDraft,
-  getStudioConcurrencyLimitForMode,
-  getStudioRunCompletionDelayMs,
-  resolveStudioGenerationRequestMode,
-  shouldStudioMockRunFail,
 } from "./studio-generation-rules";
 import { reorderStudioFoldersByIds, sortStudioFoldersByOrder } from "./studio-folder-order";
 import {
@@ -29,15 +21,8 @@ import {
   buildStudioDraftMap,
   createDraft,
   createDraftSnapshot,
-  createGeneratedLibraryItem,
-  createGenerationRunPreviewUrl,
-  createGenerationRunSummary,
-  createRunFile,
-  createStudioId,
   createStudioSeedSnapshot,
-  HOSTED_STUDIO_WORKSPACE_ID,
   hydrateDraft,
-  LOCAL_STUDIO_WORKSPACE_ID,
   toPersistedDraft,
 } from "./studio-local-runtime-data";
 import {
@@ -45,43 +30,39 @@ import {
   createDraftReferenceFromFile,
   createDraftReferenceFromLibraryItem,
   createFolderItemCounts,
-  createTextLibraryItem,
-  createUploadedRunFileAndLibraryItem,
   hasFolderNameConflict,
   isInFlightStudioRunStatus,
   isReferenceEligibleLibraryItem,
   mergeDraftReferences,
   releaseDraftReferencePreview,
   releaseRemovedDraftReferencePreviews,
-  releaseUploadedPreview,
   resolveLibraryItemToReferenceFile,
   revokePreviewUrl,
 } from "./studio-local-runtime-helpers";
-import {
-  buildStudioWorkspaceSnapshot,
-  hydrateUploadedPreviewUrlsForItems,
-} from "./studio-runtime-snapshot";
 import {
   STUDIO_MODEL_CATALOG,
   STUDIO_MODEL_SECTIONS,
   getStudioModelById,
 } from "./studio-model-catalog";
 import type {
+  LocalStudioMutation,
+  LocalStudioSnapshotResponse,
+  LocalStudioSyncResponse,
+  LocalStudioUploadManifestEntry,
+} from "./studio-local-api";
+import type {
   HostedStudioMutation,
   HostedStudioMutationResponse,
   HostedStudioSyncResponse,
   HostedStudioUploadManifestEntry,
 } from "./studio-hosted-mock-api";
-import { quoteStudioDraftPricing } from "./studio-model-pricing";
 import { getStudioUploadedMediaKind, studioUploadSupportsAlpha } from "./studio-upload-files";
 import type {
   DraftReference,
-  GenerationRun,
   LibraryItem,
   PersistedStudioDraft,
   StudioCreditPurchaseAmount,
   StudioDraft,
-  StudioFolder,
   StudioFolderEditorMode,
   StudioHostedAccount,
   StudioHostedWorkspaceState,
@@ -89,7 +70,6 @@ import type {
   StudioProviderConnectionStatus,
   StudioProviderSaveResult,
   StudioProviderSettings,
-  StudioRunFile,
   StudioVideoInputMode,
   StudioWorkspaceSnapshot,
 } from "./types";
@@ -98,10 +78,6 @@ const EMPTY_PROVIDER_SETTINGS: StudioProviderSettings = {
   falApiKey: "",
   lastValidatedAt: null,
 };
-
-function getWorkspaceIdForMode(mode: StudioAppMode) {
-  return mode === "hosted" ? HOSTED_STUDIO_WORKSPACE_ID : LOCAL_STUDIO_WORKSPACE_ID;
-}
 
 function createEmptyDraftReferenceMap() {
   return Object.fromEntries(
@@ -121,6 +97,147 @@ function createEmptyDraftFrameMap() {
       { startFrame: null, endFrame: null } satisfies DraftFrameInputs,
     ])
   ) as Record<string, DraftFrameInputs>;
+}
+
+async function fetchLocalBootstrap(signal?: AbortSignal) {
+  const response = await fetch("/api/studio/local/bootstrap", {
+    method: "GET",
+    cache: "no-store",
+    credentials: "same-origin",
+    signal,
+  });
+  const payload = (await response.json()) as LocalStudioSyncResponse & {
+    error?: string;
+  };
+
+  if (!response.ok || payload.kind === "noop") {
+    throw new Error(payload.error ?? "Could not load local workspace.");
+  }
+
+  return payload;
+}
+
+async function fetchLocalSync(params: {
+  sinceRevision: number | null;
+  signal?: AbortSignal;
+}) {
+  const searchParams = new URLSearchParams();
+  if (typeof params.sinceRevision === "number") {
+    searchParams.set("sinceRevision", String(params.sinceRevision));
+  }
+
+  const response = await fetch(`/api/studio/local/sync?${searchParams.toString()}`, {
+    method: "GET",
+    cache: "no-store",
+    credentials: "same-origin",
+    signal: params.signal,
+  });
+  const payload = (await response.json()) as LocalStudioSyncResponse & {
+    error?: string;
+  };
+
+  if (!response.ok) {
+    throw new Error(payload.error ?? "Could not sync local workspace.");
+  }
+
+  return payload;
+}
+
+async function mutateLocalSnapshot(
+  mutation: LocalStudioMutation,
+  signal?: AbortSignal
+) {
+  const response = await fetch("/api/studio/local/mutate", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(mutation),
+    cache: "no-store",
+    credentials: "same-origin",
+    signal,
+  });
+  const payload = (await response.json()) as LocalStudioSnapshotResponse & {
+    error?: string;
+  };
+
+  if (!response.ok) {
+    throw new Error(payload.error ?? "Local workspace mutation failed.");
+  }
+
+  return payload;
+}
+
+async function uploadLocalFiles(
+  files: File[],
+  folderId: string | null,
+  signal?: AbortSignal
+) {
+  const manifest = (
+    await Promise.all(
+      files.map(async (file) => {
+        const kind = getStudioUploadedMediaKind({
+          fileName: file.name,
+          mimeType: file.type,
+        });
+
+        if (!kind) {
+          return null;
+        }
+
+        const previewUrl = URL.createObjectURL(file);
+        try {
+          const metadata = await readUploadedAssetMediaMetadata({
+            kind,
+            previewUrl,
+            mimeType: file.type,
+            hasAlpha: studioUploadSupportsAlpha(file.type),
+          });
+
+          return {
+            kind,
+            mediaWidth: metadata.mediaWidth,
+            mediaHeight: metadata.mediaHeight,
+            mediaDurationSeconds: metadata.mediaDurationSeconds,
+            aspectRatioLabel: metadata.aspectRatioLabel,
+            hasAlpha: metadata.hasAlpha,
+          } satisfies LocalStudioUploadManifestEntry;
+        } finally {
+          URL.revokeObjectURL(previewUrl);
+        }
+      })
+    )
+  ).filter((entry): entry is LocalStudioUploadManifestEntry => Boolean(entry));
+
+  if (manifest.length !== files.length) {
+    throw new Error("Only image, video, and audio uploads are supported.");
+  }
+
+  const formData = new FormData();
+  if (folderId) {
+    formData.set("folderId", folderId);
+  }
+  formData.set("manifest", JSON.stringify(manifest));
+  for (const file of files) {
+    formData.append("files", file);
+  }
+
+  const response = await fetch("/api/studio/local/uploads", {
+    method: "POST",
+    body: formData,
+    cache: "no-store",
+    credentials: "same-origin",
+    signal,
+  });
+  const payload = (await response.json()) as LocalStudioSnapshotResponse & {
+    error?: string;
+  };
+
+  if (!response.ok) {
+    throw new Error(payload.error ?? "Local upload failed.");
+  }
+
+  return payload;
 }
 
 async function fetchHostedSync(params: {
@@ -286,6 +403,12 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   const draftReferencesRef = useRef(createEmptyDraftReferenceMap());
   const draftFramesRef = useRef(createEmptyDraftFrameMap());
   const runsRef = useRef(seedSnapshot.generationRuns);
+  const localModeSessionRef = useRef(0);
+  const localLatestStartedRequestRef = useRef(0);
+  const localLatestAppliedRequestRef = useRef(0);
+  const localRevisionRef = useRef(0);
+  const localSyncIntervalRef = useRef(1200);
+  const localRequestControllersRef = useRef(new Set<AbortController>());
   const hostedModeSessionRef = useRef(0);
   const hostedLatestStartedRequestRef = useRef(0);
   const hostedLatestAppliedRequestRef = useRef(0);
@@ -299,12 +422,12 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   const [modelConfiguration, setModelConfiguration] = useState<StudioModelConfiguration>(
     seedSnapshot.modelConfiguration
   );
-  const [queueSettings, setQueueSettings] = useState(seedSnapshot.queueSettings);
+  const [, setQueueSettings] = useState(seedSnapshot.queueSettings);
   const [selectedModelId, setSelectedModelIdState] = useState(seedSnapshot.selectedModelId);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [folders, setFolders] = useState(seedSnapshot.folders);
   const [items, setItems] = useState(seedSnapshot.libraryItems);
-  const [runFiles, setRunFiles] = useState(seedSnapshot.runFiles);
+  const [, setRunFiles] = useState(seedSnapshot.runFiles);
   const [runs, setRuns] = useState(seedSnapshot.generationRuns);
   const [draftsByModelId, setDraftsByModelId] = useState(seedSnapshot.draftsByModelId);
   const [draftReferencesByModelId, setDraftReferencesByModelId] = useState(
@@ -441,6 +564,52 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     completionTimersRef.current.clear();
   }, []);
 
+  const abortLocalRequests = useCallback(() => {
+    for (const controller of localRequestControllersRef.current) {
+      controller.abort();
+    }
+    localRequestControllersRef.current.clear();
+  }, []);
+
+  const beginLocalRequest = useCallback(() => {
+    const controller = new AbortController();
+    const sessionId = localModeSessionRef.current;
+    const requestId = localLatestStartedRequestRef.current + 1;
+    localLatestStartedRequestRef.current = requestId;
+    localRequestControllersRef.current.add(controller);
+
+    return {
+      controller,
+      requestId,
+      sessionId,
+    };
+  }, []);
+
+  const finishLocalRequest = useCallback((controller: AbortController) => {
+    localRequestControllersRef.current.delete(controller);
+  }, []);
+
+  const applyLocalResponse = useCallback(
+    (
+      nextSnapshot: StudioWorkspaceSnapshot,
+      params: { preserveDrafts?: boolean; requestId: number; sessionId: number; revision: number }
+    ) => {
+      if (localModeSessionRef.current !== params.sessionId) {
+        return false;
+      }
+
+      if (params.requestId < localLatestAppliedRequestRef.current) {
+        return false;
+      }
+
+      localLatestAppliedRequestRef.current = params.requestId;
+      localRevisionRef.current = params.revision;
+      applySnapshot(nextSnapshot, { preserveDrafts: params.preserveDrafts });
+      return true;
+    },
+    [applySnapshot]
+  );
+
   const abortHostedRequests = useCallback(() => {
     for (const controller of hostedRequestControllersRef.current) {
       controller.abort();
@@ -512,17 +681,29 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
 
   useEffect(() => {
     return () => {
+      abortLocalRequests();
       abortHostedRequests();
       clearAllTimers();
       cleanupPreviewUrls();
       cleanupDraftReferences();
     };
-  }, [abortHostedRequests, cleanupDraftReferences, cleanupPreviewUrls, clearAllTimers]);
+  }, [
+    abortLocalRequests,
+    abortHostedRequests,
+    cleanupDraftReferences,
+    cleanupPreviewUrls,
+    clearAllTimers,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
 
     storageHydratedRef.current = false;
+    localModeSessionRef.current += 1;
+    localLatestStartedRequestRef.current = 0;
+    localLatestAppliedRequestRef.current = 0;
+    localRevisionRef.current = 0;
+    abortLocalRequests();
     hostedModeSessionRef.current += 1;
     hostedLatestStartedRequestRef.current = 0;
     hostedLatestAppliedRequestRef.current = 0;
@@ -603,51 +784,56 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       };
     }
 
-    const nextSnapshot = loadStoredWorkspaceSnapshot() ?? seedSnapshot;
-    const nextProviderSettings = loadStoredProviderSettings() ?? nextSnapshot.providerSettings;
-
-    applySnapshot(nextSnapshot);
+    const nextProviderSettings =
+      loadStoredProviderSettings() ?? EMPTY_PROVIDER_SETTINGS;
     setProviderSettings(nextProviderSettings);
     setProviderConnectionStatus(nextProviderSettings.falApiKey ? "connected" : "idle");
-    setSelectedFolderId(null);
+    const request = beginLocalRequest();
 
-    void hydrateUploadedPreviewUrlsForItems(
-      nextSnapshot.libraryItems,
-      previewUrlsRef.current
-    ).then(
-      (hydratedItems) => {
+    void fetchLocalBootstrap(request.controller.signal)
+      .then((response) => {
+        finishLocalRequest(request.controller);
+
         if (cancelled) {
-          for (const item of hydratedItems) {
-            if (item.previewUrl?.startsWith("blob:")) {
-              revokePreviewUrl(item.previewUrl);
-            }
-          }
           return;
         }
 
-        setItems(hydratedItems);
+        localSyncIntervalRef.current = response.syncIntervalMs;
+        applyLocalResponse(response.snapshot, {
+          requestId: request.requestId,
+          revision: response.revision,
+          sessionId: request.sessionId,
+        });
         storageHydratedRef.current = true;
-      }
-    );
+      })
+      .catch(() => {
+        finishLocalRequest(request.controller);
 
-    if (nextSnapshot.libraryItems.every((item) => item.storageBucket !== "browser-upload")) {
-      setItems(nextSnapshot.libraryItems);
-      storageHydratedRef.current = true;
-    }
+        if (cancelled) {
+          return;
+        }
+
+        applySnapshot(seedSnapshot);
+        storageHydratedRef.current = true;
+      });
 
     return () => {
       cancelled = true;
     };
   }, [
     appMode,
+    abortLocalRequests,
     applySnapshot,
+    applyLocalResponse,
     cleanupDraftReferences,
     cleanupPreviewUrls,
     clearAllTimers,
     seedSnapshot,
     abortHostedRequests,
     applyHostedResponse,
+    beginLocalRequest,
     beginHostedRequest,
+    finishLocalRequest,
     finishHostedRequest,
   ]);
 
@@ -656,39 +842,55 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       return;
     }
 
-    const snapshot = buildStudioWorkspaceSnapshot({
-      activeCreditPack,
-      appMode,
-      creditBalance,
-      draftsByModelId,
-      folders,
-      gallerySizeLevel,
-      items,
-      modelConfiguration,
-      profile,
-      providerSettings,
-      queueSettings,
-      runFiles,
-      runs,
-      selectedModelId: visibleSelectedModelId,
-    });
+    let cancelled = false;
+    const timeoutId = window.setTimeout(() => {
+      const request = beginLocalRequest();
 
-    saveStoredWorkspaceSnapshot(snapshot);
+      void mutateLocalSnapshot(
+        {
+          action: "save_ui_state",
+          draftsByModelId,
+          selectedModelId: visibleSelectedModelId,
+          gallerySizeLevel,
+          lastValidatedAt: providerSettings.lastValidatedAt,
+        },
+        request.controller.signal
+      )
+        .then((response) => {
+          finishLocalRequest(request.controller);
+
+          if (cancelled) {
+            return;
+          }
+
+          applyLocalResponse(response.snapshot, {
+            preserveDrafts: true,
+            requestId: request.requestId,
+            revision: response.revision,
+            sessionId: request.sessionId,
+          });
+        })
+        .catch((error) => {
+          finishLocalRequest(request.controller);
+          if (error instanceof DOMException && error.name === "AbortError") {
+            return;
+          }
+        });
+    }, 220);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
   }, [
-    activeCreditPack,
     appMode,
-    creditBalance,
     draftsByModelId,
-    folders,
     gallerySizeLevel,
-    items,
-    modelConfiguration,
-    profile,
     providerSettings,
-    queueSettings,
-    runFiles,
-    runs,
     visibleSelectedModelId,
+    applyLocalResponse,
+    beginLocalRequest,
+    finishLocalRequest,
   ]);
 
   useEffect(() => {
@@ -751,238 +953,58 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     };
   }, [appMode, applyHostedResponse, beginHostedRequest, finishHostedRequest]);
 
-  const scheduleDispatchAttempt = useCallback(
-    (runId: string, delayMs: number) => {
-      const existingTimerId = dispatchTimersRef.current.get(runId);
-      if (existingTimerId) {
-        window.clearTimeout(existingTimerId);
-      }
-
-      const timerId = window.setTimeout(() => {
-        dispatchTimersRef.current.delete(runId);
-        let reschedule = false;
-
-        setRuns((current) => {
-          const run = current.find((entry) => entry.id === runId);
-          if (!run || (run.status !== "queued" && run.status !== "pending")) {
-            return current;
-          }
-
-          const concurrencyLimit = getStudioConcurrencyLimitForMode(
-            appMode,
-            queueSettings
-          );
-          const processingCount = current.filter(
-            (entry) => entry.status === "processing"
-          ).length;
-
-          if (processingCount >= concurrencyLimit) {
-            reschedule = true;
-            return current;
-          }
-
-          const startedAt = new Date().toISOString();
-          return current.map((entry) =>
-            entry.id === runId
-              ? {
-                  ...entry,
-                  status: "processing",
-                  startedAt,
-                  updatedAt: startedAt,
-                  providerRequestId: entry.providerRequestId ?? `fal_mock_${entry.id}`,
-                  providerStatus: "running",
-                  dispatchAttemptCount: entry.dispatchAttemptCount + 1,
-                  dispatchLeaseExpiresAt: null,
-                  canCancel: false,
-                }
-              : entry
-          );
-        });
-
-        if (reschedule) {
-          scheduleDispatchAttempt(runId, 450);
-        }
-      }, delayMs);
-
-      dispatchTimersRef.current.set(runId, timerId);
-    },
-    [appMode, queueSettings]
-  );
-
-  const finalizeRunFailure = useCallback(
-    (run: GenerationRun) => {
-      const finishedAt = new Date().toISOString();
-      const heldCredits = run.estimatedCredits ?? 0;
-
-      setRuns((current) =>
-        current.map((entry) =>
-          entry.id === run.id
-            ? {
-                ...entry,
-                status: "failed",
-                completedAt: finishedAt,
-                failedAt: finishedAt,
-                updatedAt: finishedAt,
-                providerStatus: "failed",
-                errorMessage:
-                  "Mock Fal generation failed before an output asset was returned.",
-                canCancel: false,
-              }
-            : entry
-        )
-      );
-
-      if (appMode === "hosted" && heldCredits > 0 && creditBalance) {
-        setCreditBalance((current) =>
-          current
-            ? {
-                ...current,
-                balanceCredits: current.balanceCredits + heldCredits,
-                updatedAt: finishedAt,
-              }
-            : current
-        );
-      }
-    },
-    [appMode, creditBalance]
-  );
-
-  const finalizeRunSuccess = useCallback(
-    (run: GenerationRun) => {
-      const model = getStudioModelById(run.modelId);
-      const draft = hydrateDraft(run.draftSnapshot, model);
-      const completedAt = new Date().toISOString();
-      const nextRunFileId = run.kind === "text" ? null : createStudioId("run-file");
-
-      const nextItem = createGeneratedLibraryItem({
-        runFileId: nextRunFileId,
-        sourceRunId: run.id,
-        model,
-        draft,
-        createdAt: completedAt,
-        folderId: run.folderId,
-        runId: run.id,
-        userId: run.userId,
-        workspaceId: run.workspaceId,
-      });
-      const nextRunFile: StudioRunFile | null =
-        nextRunFileId && nextItem.previewUrl
-          ? createRunFile({
-              id: nextRunFileId,
-              runId: run.id,
-              userId: run.userId,
-              sourceType: "generated",
-              fileRole: "output",
-              previewUrl: nextItem.previewUrl,
-              fileName: nextItem.fileName ?? `${run.id}.bin`,
-              mimeType: nextItem.mimeType || "application/octet-stream",
-              mediaWidth: nextItem.mediaWidth,
-              mediaHeight: nextItem.mediaHeight,
-              mediaDurationSeconds: nextItem.mediaDurationSeconds,
-              hasAlpha: nextItem.hasAlpha,
-              createdAt: completedAt,
-            })
-          : null;
-
-      setItems((current) => [nextItem, ...current]);
-
-      if (nextRunFile) {
-        setRunFiles((current) => [nextRunFile, ...current]);
-      }
-
-      setRuns((current) =>
-        current.map((entry) =>
-          entry.id === run.id
-            ? {
-                ...entry,
-                status: "completed",
-                completedAt,
-                updatedAt: completedAt,
-                providerStatus: "completed",
-                outputAssetId: nextItem.id,
-                actualCostUsd: entry.estimatedCostUsd,
-                actualCredits: entry.estimatedCredits,
-                outputText: nextItem.kind === "text" ? nextItem.contentText : null,
-                canCancel: false,
-              }
-            : entry
-        )
-      );
-    },
-    []
-  );
-
-  const scheduleRunCompletion = useCallback(
-    (run: GenerationRun) => {
-      const existingTimerId = completionTimersRef.current.get(run.id);
-      if (existingTimerId) {
-        window.clearTimeout(existingTimerId);
-      }
-
-      const elapsedMs = run.startedAt
-        ? Math.max(0, Date.now() - Date.parse(run.startedAt))
-        : 0;
-      const delayMs = Math.max(400, getStudioRunCompletionDelayMs(run) - elapsedMs);
-
-      const timerId = window.setTimeout(() => {
-        completionTimersRef.current.delete(run.id);
-
-        const latestRun = runsRef.current.find((entry) => entry.id === run.id);
-        if (!latestRun || latestRun.status !== "processing") {
-          return;
-        }
-
-        if (shouldStudioMockRunFail(latestRun)) {
-          finalizeRunFailure(latestRun);
-          return;
-        }
-
-        finalizeRunSuccess(latestRun);
-      }, delayMs);
-
-      completionTimersRef.current.set(run.id, timerId);
-    },
-    [finalizeRunFailure, finalizeRunSuccess]
-  );
-
   useEffect(() => {
-    if (appMode === "hosted") {
-      clearAllTimers();
+    if (appMode !== "local" || !storageHydratedRef.current) {
       return;
     }
 
-    const activeRunIds = new Set(
-      runs
-        .filter((run) => run.status === "queued" || run.status === "pending")
-        .map((run) => run.id)
-    );
-    for (const [runId, timerId] of dispatchTimersRef.current) {
-      if (!activeRunIds.has(runId)) {
-        window.clearTimeout(timerId);
-        dispatchTimersRef.current.delete(runId);
-      }
-    }
+    let timeoutId = 0;
+    let cancelled = false;
 
-    const processingRunIds = new Set(
-      runs.filter((run) => run.status === "processing").map((run) => run.id)
-    );
-    for (const [runId, timerId] of completionTimersRef.current) {
-      if (!processingRunIds.has(runId)) {
-        window.clearTimeout(timerId);
-        completionTimersRef.current.delete(runId);
-      }
-    }
-
-    for (const run of runs) {
-      if ((run.status === "queued" || run.status === "pending") && !dispatchTimersRef.current.has(run.id)) {
-        scheduleDispatchAttempt(run.id, 320);
+    const scheduleNextSync = () => {
+      if (cancelled) {
+        return;
       }
 
-      if (run.status === "processing" && !completionTimersRef.current.has(run.id)) {
-        scheduleRunCompletion(run);
-      }
-    }
-  }, [appMode, clearAllTimers, runs, scheduleDispatchAttempt, scheduleRunCompletion]);
+      timeoutId = window.setTimeout(() => {
+        const request = beginLocalRequest();
+
+        void fetchLocalSync({
+          sinceRevision: localRevisionRef.current,
+          signal: request.controller.signal,
+        })
+          .then((response) => {
+            finishLocalRequest(request.controller);
+            localSyncIntervalRef.current = response.syncIntervalMs;
+
+            if (response.kind !== "noop") {
+              applyLocalResponse(response.snapshot, {
+                preserveDrafts: true,
+                requestId: request.requestId,
+                revision: response.revision,
+                sessionId: request.sessionId,
+              });
+            }
+
+            scheduleNextSync();
+          })
+          .catch((error) => {
+            finishLocalRequest(request.controller);
+            if (error instanceof DOMException && error.name === "AbortError") {
+              return;
+            }
+            scheduleNextSync();
+          });
+      }, localSyncIntervalRef.current);
+    };
+
+    scheduleNextSync();
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [appMode, applyLocalResponse, beginLocalRequest, finishLocalRequest]);
 
   const selectedModel = useMemo(
     () => models.find((model) => model.id === visibleSelectedModelId) ?? models[0],
@@ -1064,6 +1086,82 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   const selectedItemCount = selectedItemIds.length;
   const hasFalKey = providerSettings.falApiKey.trim().length > 0;
   const maxReferenceFiles = selectedModel.maxReferenceFiles ?? 6;
+
+  const applyLocalMutation = useCallback(
+    async (
+      mutation: LocalStudioMutation,
+      options?: { preserveDrafts?: boolean }
+    ) => {
+      const request = beginLocalRequest();
+
+      try {
+        const response = await mutateLocalSnapshot(
+          mutation,
+          request.controller.signal
+        );
+        applyLocalResponse(response.snapshot, {
+          preserveDrafts: options?.preserveDrafts ?? true,
+          requestId: request.requestId,
+          revision: response.revision,
+          sessionId: request.sessionId,
+        });
+        return response.snapshot;
+      } finally {
+        finishLocalRequest(request.controller);
+      }
+    },
+    [applyLocalResponse, beginLocalRequest, finishLocalRequest]
+  );
+
+  const applyLocalUpload = useCallback(
+    async (files: File[], folderId: string | null) => {
+      const request = beginLocalRequest();
+
+      try {
+        const response = await uploadLocalFiles(
+          files,
+          folderId,
+          request.controller.signal
+        );
+        applyLocalResponse(response.snapshot, {
+          preserveDrafts: true,
+          requestId: request.requestId,
+          revision: response.revision,
+          sessionId: request.sessionId,
+        });
+        return response.snapshot;
+      } finally {
+        finishLocalRequest(request.controller);
+      }
+    },
+    [applyLocalResponse, beginLocalRequest, finishLocalRequest]
+  );
+
+  const refreshLocalState = useCallback(() => {
+    const request = beginLocalRequest();
+
+    void fetchLocalSync({
+      sinceRevision: null,
+      signal: request.controller.signal,
+    })
+      .then((response) => {
+        finishLocalRequest(request.controller);
+        if (response.kind === "noop") {
+          return;
+        }
+
+        localSyncIntervalRef.current = response.syncIntervalMs;
+        applyLocalResponse(response.snapshot, {
+          preserveDrafts: true,
+          requestId: request.requestId,
+          revision: response.revision,
+          sessionId: request.sessionId,
+        });
+      })
+      .catch(() => {
+        finishLocalRequest(request.controller);
+      });
+  }, [applyLocalResponse, beginLocalRequest, finishLocalRequest]);
 
   const applyHostedMutation = useCallback(
     async (mutation: HostedStudioMutation) => {
@@ -1173,10 +1271,16 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
         enabledModelIds: nextEnabledModelIds,
         updatedAt,
       });
+      void applyLocalMutation({
+        action: "set_enabled_models",
+        enabledModelIds: nextEnabledModelIds,
+      }).catch(refreshLocalState);
     },
     [
       appMode,
+      applyLocalMutation,
       applyHostedMutation,
+      refreshLocalState,
       refreshHostedState,
     ]
   );
@@ -1571,22 +1675,12 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       return;
     }
 
-    const itemIdSet = new Set(itemIds);
-    const updatedAt = new Date().toISOString();
-
-    setItems((current) =>
-      current.map((item) =>
-        itemIdSet.has(item.id)
-          ? {
-              ...item,
-              folderId,
-              folderIds: folderId ? [folderId] : [],
-              updatedAt,
-            }
-          : item
-      )
-    );
-  }, [appMode, applyHostedMutation]);
+    void applyLocalMutation({
+      action: "move_items",
+      itemIds,
+      folderId,
+    }).catch(refreshLocalState);
+  }, [appMode, applyHostedMutation, applyLocalMutation, refreshLocalState]);
 
   const deleteItems = useCallback((itemIds: string[]) => {
     if (itemIds.length === 0) return;
@@ -1602,34 +1696,14 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       return;
     }
 
-    const itemIdSet = new Set(itemIds);
-    const itemsToDelete = items.filter((item) => itemIdSet.has(item.id));
-
-    for (const item of itemsToDelete) {
-      releaseUploadedPreview(item, previewUrlsRef.current);
-      if (item.storageBucket === "browser-upload" && item.storagePath) {
-        void deleteUploadedAssetFile(item.storagePath);
-      }
-    }
-
-    setItems((current) => current.filter((item) => !itemIdSet.has(item.id)));
-    setRunFiles((current) =>
-      current.filter(
-        (runFile) =>
-          !itemsToDelete.some((item) => item.runFileId && item.runFileId === runFile.id)
-      )
-    );
-    setRuns((current) =>
-      current.map((run) =>
-        run.outputAssetId && itemIdSet.has(run.outputAssetId)
-          ? { ...run, outputAssetId: null }
-          : run
-      )
-    );
     setSelectedItemIds((current) =>
-      current.filter((itemId) => !itemIdSet.has(itemId))
+      current.filter((itemId) => !itemIds.includes(itemId))
     );
-  }, [appMode, applyHostedMutation, items]);
+    void applyLocalMutation({
+      action: "delete_items",
+      itemIds,
+    }).catch(refreshLocalState);
+  }, [appMode, applyHostedMutation, applyLocalMutation, refreshLocalState]);
 
   const deleteItem = useCallback(
     (itemId: string) => {
@@ -1722,25 +1796,11 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       }
 
       if (folderEditorMode === "create") {
-        const createdAt = new Date().toISOString();
-        const nextFolder: StudioFolder = {
-          id: createStudioId("folder"),
-          userId: profile.id,
-          workspaceId: getWorkspaceIdForMode(appMode),
+        const nextSnapshot = await applyLocalMutation({
+          action: "create_folder",
           name: nextName,
-          createdAt,
-          updatedAt: createdAt,
-          sortOrder: 0,
-        };
-
-        setFolders((current) => [
-          nextFolder,
-          ...current.map((folder, index) => ({
-            ...folder,
-            sortOrder: index + 1,
-          })),
-        ]);
-        setSelectedFolderId(nextFolder.id);
+        });
+        setSelectedFolderId(nextSnapshot.folders[0]?.id ?? null);
         resetFolderEditor();
         return;
       }
@@ -1749,26 +1809,28 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
         return;
       }
 
-      setFolders((current) =>
-        current.map((folder) =>
-          folder.id === folderEditorTargetId
-            ? { ...folder, name: nextName, updatedAt: new Date().toISOString() }
-            : folder
-        )
-      );
+      await applyLocalMutation({
+        action: "rename_folder",
+        folderId: folderEditorTargetId,
+        name: nextName,
+      });
       resetFolderEditor();
+    } catch (error) {
+      setFolderEditorError(
+        error instanceof Error ? error.message : "Could not save folder."
+      );
     } finally {
       setFolderEditorSaving(false);
     }
   }, [
     appMode,
+    applyLocalMutation,
     folderEditorMode,
     folderEditorSaving,
     folderEditorTargetId,
     folderEditorValue,
     folders,
     applyHostedMutation,
-    profile.id,
     resetFolderEditor,
   ]);
 
@@ -1782,33 +1844,12 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       return;
     }
 
-    setFolders((current) =>
-      current
-        .filter((folder) => folder.id !== folderId)
-        .map((folder, index) => ({
-          ...folder,
-          sortOrder: index,
-        }))
-    );
-    setItems((current) =>
-      current.map((item) =>
-        item.folderIds.includes(folderId)
-          ? {
-              ...item,
-              folderId: null,
-              folderIds: [],
-              updatedAt: new Date().toISOString(),
-            }
-          : item
-      )
-    );
-    setRuns((current) =>
-      current.map((run) =>
-        run.folderId === folderId ? { ...run, folderId: null } : run
-      )
-    );
     setSelectedFolderId((current) => (current === folderId ? null : current));
-  }, [appMode, applyHostedMutation]);
+    void applyLocalMutation({
+      action: "delete_folder",
+      folderId,
+    }).catch(refreshLocalState);
+  }, [appMode, applyHostedMutation, applyLocalMutation, refreshLocalState]);
 
   const reorderFolders = useCallback(
     (orderedFolderIds: string[]) => {
@@ -1821,18 +1862,24 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
         reorderStudioFoldersByIds(current, orderedFolderIds, updatedAt)
       );
 
-      if (appMode !== "hosted") {
+      if (appMode === "hosted") {
+        void applyHostedMutation({
+          action: "reorder_folders",
+          orderedFolderIds,
+        }).catch(refreshHostedState);
         return;
       }
 
-      void applyHostedMutation({
+      void applyLocalMutation({
         action: "reorder_folders",
         orderedFolderIds,
-      }).catch(refreshHostedState);
+      }).catch(refreshLocalState);
     },
     [
       appMode,
+      applyLocalMutation,
       applyHostedMutation,
+      refreshLocalState,
       refreshHostedState,
     ]
   );
@@ -1964,26 +2011,14 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
         return;
       }
 
-      setItems((current) =>
-        current.map((item) => {
-          if (item.id !== itemId || item.kind !== "text") {
-            return item;
-          }
-
-          const nextTitle = patch.title?.trim() ?? item.title;
-          const nextContentText = patch.contentText?.trim() ?? item.contentText ?? "";
-
-          return {
-            ...item,
-            title: nextTitle || "Text note",
-            contentText: nextContentText,
-            prompt: nextContentText,
-            updatedAt: new Date().toISOString(),
-          };
-        })
-      );
+      void applyLocalMutation({
+        action: "update_text_item",
+        itemId,
+        title: patch.title,
+        contentText: patch.contentText,
+      }).catch(refreshLocalState);
     },
-    [appMode, applyHostedMutation]
+    [appMode, applyHostedMutation, applyLocalMutation, refreshLocalState]
   );
 
   const openCreateTextComposer = useCallback(() => {
@@ -2044,15 +2079,12 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
         return;
       }
 
-      const nextItem = createTextLibraryItem({
-        userId: profile.id,
-        workspaceId: getWorkspaceIdForMode(appMode),
+      await applyLocalMutation({
+        action: "create_text_item",
         title: createTextTitle,
         body: createTextBody,
         folderId: selectedFolderId,
       });
-
-      setItems((current) => [nextItem, ...current]);
       setCreateTextSaving(false);
       setCreateTextDialogOpen(false);
       setCreateTextTitle("");
@@ -2066,11 +2098,11 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     }
   }, [
     appMode,
+    applyLocalMutation,
     applyHostedMutation,
     createTextBody,
     createTextSaving,
     createTextTitle,
-    profile.id,
     selectedFolderId,
   ]);
 
@@ -2109,53 +2141,13 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
           return;
         }
 
-        const createdEntriesResult = await Promise.all(
-          files.map((file) =>
-            createUploadedRunFileAndLibraryItem({
-              file,
-              userId: profile.id,
-              workspaceId: getWorkspaceIdForMode(appMode),
-              folderId: folderIdOverride ?? selectedFolderId,
-            })
-          )
-        );
-        const createdEntries = createdEntriesResult.filter(
-          (entry): entry is NonNullable<(typeof createdEntriesResult)[number]> =>
-            Boolean(entry)
-        );
-
-        if (createdEntries.length === 0) {
-          return;
-        }
-
-        for (const [index, entry] of createdEntriesResult.entries()) {
-          if (!entry) {
-            continue;
-          }
-
-          if (entry.item.previewUrl) {
-            previewUrlsRef.current.set(entry.item.id, entry.item.previewUrl);
-          }
-
-          if (entry.item.storagePath) {
-            const sourceFile = files[index];
-            if (sourceFile) {
-              await saveUploadedAssetFile(entry.item.storagePath, sourceFile);
-            }
-          }
-        }
-
-        const nextItems = createdEntries.map((entry) => entry.item);
-        const nextRunFiles = createdEntries.map((entry) => entry.runFile);
-
-        setItems((current) => [...nextItems, ...current]);
-        setRunFiles((current) => [...nextRunFiles, ...current]);
+        await applyLocalUpload(files, folderIdOverride ?? selectedFolderId);
         setUploadDialogOpen(false);
       } finally {
         setUploadAssetsLoading(false);
       }
     },
-    [appMode, applyHostedUpload, profile.id, selectedFolderId, uploadAssetsLoading]
+    [appMode, applyHostedUpload, applyLocalUpload, selectedFolderId, uploadAssetsLoading]
   );
 
   const saveProviderSettings = useCallback(
@@ -2222,30 +2214,12 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
         return;
       }
 
-      const queuedTimerId = dispatchTimersRef.current.get(runId);
-      if (queuedTimerId) {
-        window.clearTimeout(queuedTimerId);
-        dispatchTimersRef.current.delete(runId);
-      }
-
-      const cancelledAt = new Date().toISOString();
-      setRuns((current) =>
-        current.map((entry) =>
-          entry.id === runId
-            ? {
-                ...entry,
-                status: "cancelled",
-                cancelledAt,
-                completedAt: cancelledAt,
-                updatedAt: cancelledAt,
-                providerStatus: "cancelled",
-                canCancel: false,
-              }
-            : entry
-        )
-      );
+      void applyLocalMutation({
+        action: "cancel_run",
+        runId,
+      }).catch(refreshLocalState);
     },
-    [appMode, applyHostedMutation]
+    [appMode, applyHostedMutation, applyLocalMutation, refreshLocalState]
   );
 
   const purchaseHostedCredits = useCallback(async (credits: StudioCreditPurchaseAmount) => {
@@ -2323,92 +2297,33 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       return;
     }
 
-    const activeJobCount = runsRef.current.filter((run) =>
-      run.status === "queued" || run.status === "pending" || run.status === "processing"
-    ).length;
-    if (activeJobCount >= queueSettings.maxActiveJobsPerUser) {
-      setQueueLimitDialogOpen(true);
-      return;
-    }
-
-    const pricingQuote = quoteStudioDraftPricing(selectedModel, currentDraft);
-    const estimatedCredits = pricingQuote.billedCredits;
-    const requestMode = resolveStudioGenerationRequestMode(selectedModel, currentDraft);
-
-    const createdAt = new Date().toISOString();
-    const runId = createStudioId("run");
-    const nextRun: GenerationRun = {
-      id: runId,
-      userId: profile.id,
-      workspaceId: getWorkspaceIdForMode(appMode),
-      folderId: selectedFolderId,
+    void applyLocalMutation({
+      action: "generate",
       modelId: selectedModel.id,
-      modelName: selectedModel.name,
-      kind: selectedModel.kind,
-      provider: "fal",
-      requestMode,
-      status: "queued",
-      prompt: currentDraft.prompt,
-      createdAt,
-      queueEnteredAt: createdAt,
-      startedAt: null,
-      completedAt: null,
-      failedAt: null,
-      cancelledAt: null,
-      updatedAt: createdAt,
-      summary: createGenerationRunSummary(selectedModel, currentDraft),
-      outputAssetId: null,
-      previewUrl: createGenerationRunPreviewUrl(selectedModel, currentDraft),
-      errorMessage: null,
-      inputPayload: {
-        prompt: currentDraft.prompt,
-        negative_prompt: currentDraft.negativePrompt,
-        reference_count: currentDraft.references.length,
-        start_frame_count: currentDraft.startFrame ? 1 : 0,
-        end_frame_count: currentDraft.endFrame ? 1 : 0,
-        video_input_mode: currentDraft.videoInputMode,
-        request_mode: requestMode,
-      },
-      inputSettings: {
-        video_input_mode: currentDraft.videoInputMode,
-        aspect_ratio: currentDraft.aspectRatio,
-        resolution: currentDraft.resolution,
-        output_format: currentDraft.outputFormat,
-        duration_seconds: currentDraft.durationSeconds,
-        include_audio: currentDraft.includeAudio,
-        image_count: currentDraft.imageCount,
-        tone: currentDraft.tone,
-        max_tokens: currentDraft.maxTokens,
-        temperature: currentDraft.temperature,
-        voice: currentDraft.voice,
-        language: currentDraft.language,
-        speaking_rate: currentDraft.speakingRate,
-        start_frame_count: currentDraft.startFrame ? 1 : 0,
-        end_frame_count: currentDraft.endFrame ? 1 : 0,
-      },
-      providerRequestId: null,
-      providerStatus: "queued",
-      estimatedCostUsd: pricingQuote.apiCostUsd,
-      actualCostUsd: null,
-      estimatedCredits,
-      actualCredits: null,
-      usageSnapshot: {},
-      outputText: null,
-      pricingSnapshot: pricingQuote.pricingSnapshot,
-      dispatchAttemptCount: 0,
-      dispatchLeaseExpiresAt: null,
-      canCancel: true,
-      draftSnapshot: createDraftSnapshot(currentDraft),
-    };
+      folderId: selectedFolderId,
+      draft: createDraftSnapshot(currentDraft),
+      referenceCount: currentDraft.references.length,
+      startFrameCount: currentDraft.startFrame ? 1 : 0,
+      endFrameCount: currentDraft.endFrame ? 1 : 0,
+    }).catch((error) => {
+      if (
+        error instanceof Error &&
+        error.message ===
+          "limit of 100 concurrent queues/ generations reached, please wait for your generations to finish before continuing."
+      ) {
+        setQueueLimitDialogOpen(true);
+        return;
+      }
 
-    setRuns((current) => [nextRun, ...current]);
+      refreshLocalState();
+    });
   }, [
     appMode,
+    applyLocalMutation,
     applyHostedMutation,
     currentDraft,
     hasFalKey,
-    profile.id,
-    queueSettings.maxActiveJobsPerUser,
+    refreshLocalState,
     selectedFolderId,
     selectedModel,
   ]);
