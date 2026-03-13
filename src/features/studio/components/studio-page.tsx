@@ -7,6 +7,7 @@ import { FloatingControlBar } from "./floating-control-bar";
 import { FolderDeleteDialog } from "./folder-delete-dialog";
 import { FolderDialog } from "./folder-dialog";
 import { FolderSidebar } from "./folder-sidebar";
+import { HostedAuthDialog } from "./hosted-auth-dialog";
 import { QueueLimitDialog } from "./queue-limit-dialog";
 import { StudioDevModeOverlay } from "./studio-dev-mode-overlay";
 import { StudioDragPreviewOverlay } from "./studio-drag-preview-overlay";
@@ -163,6 +164,11 @@ export function StudioPage({
   const showDevModeToggle = canSwitchModes && !hideDevModeToggle;
 
   const openAccountSurface = () => {
+    if (appMode === "hosted" && !studio.hostedUserSignedIn) {
+      studio.openHostedAuthDialog();
+      return;
+    }
+
     studio.setSettingsDialogOpen(true);
   };
 
@@ -332,6 +338,7 @@ export function StudioPage({
             folderCounts={studio.folderCounts}
             folders={studio.folders}
             hasFalKey={studio.hasFalKey}
+            hostedAuthenticated={studio.hostedUserSignedIn}
             onClearSelection={studio.clearSelection}
             onDownloadSelected={downloadSelectedItems}
             onDeleteSelected={studio.deleteSelectedItems}
@@ -371,6 +378,7 @@ export function StudioPage({
             appMode={appMode}
             accountLabel={studio.accountButtonLabel}
             hasFalKey={studio.hasFalKey}
+            hostedAuthenticated={studio.hostedUserSignedIn}
             onClearSelection={studio.clearSelection}
             onDeleteSelected={studio.deleteSelectedItems}
             onDownloadSelected={downloadSelectedItems}
@@ -393,6 +401,13 @@ export function StudioPage({
           onChange={handleAppModeChange}
         />
       ) : null}
+
+      <HostedAuthDialog
+        errorMessage={studio.hostedAuthErrorMessage}
+        open={studio.hostedAuthDialogOpen}
+        pending={studio.hostedAuthPending}
+        onContinue={studio.signInWithGoogleHostedAccount}
+      />
 
       <StudioSettingsDialog
         key={`${appMode}:${studio.settingsDialogOpen ? "open" : "closed"}`}

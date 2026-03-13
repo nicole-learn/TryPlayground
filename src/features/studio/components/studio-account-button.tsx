@@ -5,6 +5,7 @@ import type { StudioAppMode } from "../studio-app-mode";
 interface StudioAccountButtonProps {
   appMode: StudioAppMode;
   hasFalKey: boolean;
+  hostedAuthenticated?: boolean;
   hostedLabel?: string;
   onClick: () => void;
 }
@@ -12,12 +13,17 @@ interface StudioAccountButtonProps {
 export function StudioAccountButton({
   appMode,
   hasFalKey,
+  hostedAuthenticated = true,
   hostedLabel = "N",
   onClick,
 }: StudioAccountButtonProps) {
   const isHostedMode = appMode === "hosted";
   const buttonLabel = isHostedMode ? hostedLabel : "T";
-  const buttonTitle = isHostedMode ? "Account settings" : "Settings";
+  const buttonTitle = isHostedMode
+    ? hostedAuthenticated
+      ? "Account settings"
+      : "Sign in with Google"
+    : "Settings";
 
   return (
     <button

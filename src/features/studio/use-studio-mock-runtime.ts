@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { User } from "@supabase/supabase-js";
 import type { StudioAppMode } from "./studio-app-mode";
 import { readUploadedAssetMediaMetadata } from "./studio-asset-metadata";
 import {
@@ -45,8 +46,11 @@ import {
   getStudioModelById,
 } from "./studio-model-catalog";
 import {
-  ensureHostedAccessToken,
+  getHostedAccessToken,
+  getHostedSessionState,
+  signInWithGoogleHostedSession,
   signOutHostedSession,
+  subscribeToHostedAuthChanges,
 } from "./studio-hosted-session";
 import type {
   LocalStudioMutation,
@@ -85,6 +89,28 @@ const EMPTY_PROVIDER_SETTINGS: StudioProviderSettings = {
   lastValidatedAt: null,
 };
 
+type HostedAuthStatus = "checking" | "signed_out" | "signed_in";
+
+function createSignedOutHostedSnapshot(seedSnapshot: StudioWorkspaceSnapshot) {
+  return {
+    ...seedSnapshot,
+    profile: {
+      ...seedSnapshot.profile,
+      id: "hosted-signed-out",
+      email: "",
+      displayName: "",
+      avatarLabel: "G",
+      avatarUrl: null,
+    },
+    creditBalance: null,
+    activeCreditPack: null,
+    folders: [],
+    runFiles: [],
+    libraryItems: [],
+    generationRuns: [],
+  } satisfies StudioWorkspaceSnapshot;
+}
+
 function createEmptyDraftReferenceMap() {
   return Object.fromEntries(
     STUDIO_MODEL_CATALOG.map((model) => [model.id, [] as DraftReference[]])
@@ -109,11 +135,15 @@ async function fetchHostedWithSession(
   input: RequestInfo | URL,
   init?: RequestInit
 ) {
-  const accessToken = await ensureHostedAccessToken();
+  const accessToken = await getHostedAccessToken();
+  if (!accessToken) {
+    throw new Error("Sign in with Google to use hosted mode.");
+  }
+
   const headers = new Headers(init?.headers);
   headers.set("Authorization", `Bearer ${accessToken}`);
 
-  let response = await fetch(input, {
+  const response = await fetch(input, {
     ...init,
     headers,
     cache: "no-store",
@@ -125,18 +155,7 @@ async function fetchHostedWithSession(
   }
 
   await signOutHostedSession().catch(() => undefined);
-  const retryAccessToken = await ensureHostedAccessToken();
-  const retryHeaders = new Headers(init?.headers);
-  retryHeaders.set("Authorization", `Bearer ${retryAccessToken}`);
-
-  response = await fetch(input, {
-    ...init,
-    headers: retryHeaders,
-    cache: "no-store",
-    credentials: "same-origin",
-  });
-
-  return response;
+  throw new Error("Your hosted session expired. Sign in with Google again.");
 }
 
 async function fetchLocalBootstrap(signal?: AbortSignal) {
@@ -471,6 +490,10 @@ async function validateFalApiKey(falApiKey: string) {
 
 export function useStudioMockRuntime(appMode: StudioAppMode) {
   const seedSnapshot = useMemo(() => createStudioSeedSnapshot(appMode), [appMode]);
+  const signedOutHostedSnapshot = useMemo(
+    () => createSignedOutHostedSnapshot(seedSnapshot),
+    [seedSnapshot]
+  );
   const previewUrlsRef = useRef(new Map<string, string>());
   const storageHydratedRef = useRef(false);
   const dispatchTimersRef = useRef(new Map<string, number>());
@@ -490,6 +513,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   const hostedRevisionRef = useRef(0);
   const hostedSyncIntervalRef = useRef(1400);
   const hostedRequestControllersRef = useRef(new Set<AbortController>());
+  const zeroCreditsDialogOpenedRef = useRef(false);
 
   const [profile, setProfile] = useState(seedSnapshot.profile);
   const [creditBalance, setCreditBalance] = useState(seedSnapshot.creditBalance);
@@ -546,6 +570,15 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   const [queueLimitDialogOpen, setQueueLimitDialogOpen] = useState(false);
   const [purchaseCreditsPending, setPurchaseCreditsPending] = useState(false);
   const [hostedSetupMessage, setHostedSetupMessage] = useState<string | null>(null);
+  const [hostedAuthStatus, setHostedAuthStatus] = useState<HostedAuthStatus>(
+    appMode === "hosted" ? "checking" : "signed_out"
+  );
+  const [hostedAuthDialogOpen, setHostedAuthDialogOpen] = useState(false);
+  const [hostedAuthPending, setHostedAuthPending] = useState(false);
+  const [hostedAuthErrorMessage, setHostedAuthErrorMessage] = useState<string | null>(
+    null
+  );
+  const [hostedSessionUser, setHostedSessionUser] = useState<User | null>(null);
   const normalizedEnabledModelIds = useMemo(
     () => normalizeStudioEnabledModelIds(modelConfiguration.enabledModelIds),
     [modelConfiguration.enabledModelIds]
@@ -554,6 +587,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     () => getConfiguredStudioModels(normalizedEnabledModelIds),
     [normalizedEnabledModelIds]
   );
+  const hostedUserSignedIn = hostedAuthStatus === "signed_in";
 
   const applySnapshot = useCallback(
     (nextSnapshot: StudioWorkspaceSnapshot, options?: { preserveDrafts?: boolean }) => {
@@ -772,6 +806,102 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   ]);
 
   useEffect(() => {
+    if (appMode !== "hosted") {
+      setHostedAuthStatus("signed_out");
+      setHostedSessionUser(null);
+      setHostedAuthDialogOpen(false);
+      setHostedAuthPending(false);
+      setHostedAuthErrorMessage(null);
+      return;
+    }
+
+    let cancelled = false;
+    setHostedAuthStatus("checking");
+
+    const clearHostedAuthErrorFromUrl = () => {
+      if (typeof window === "undefined") {
+        return;
+      }
+
+      const url = new URL(window.location.href);
+      if (!url.searchParams.has("hostedAuthError")) {
+        return;
+      }
+
+      url.searchParams.delete("hostedAuthError");
+      window.history.replaceState({}, "", url.toString());
+    };
+
+    void getHostedSessionState()
+      .then((sessionState) => {
+        if (cancelled) {
+          return;
+        }
+
+        clearHostedAuthErrorFromUrl();
+        setHostedSessionUser(sessionState.user);
+        setHostedAuthStatus(
+          sessionState.accessToken ? "signed_in" : "signed_out"
+        );
+        setHostedAuthDialogOpen(!sessionState.accessToken);
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+
+        setHostedSessionUser(null);
+        setHostedAuthStatus("signed_out");
+        setHostedAuthDialogOpen(true);
+        setHostedAuthErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "Could not check your hosted session."
+        );
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setHostedAuthPending(false);
+        }
+      });
+
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("hostedAuthError") === "google-sign-in") {
+        setHostedAuthErrorMessage(
+          "Google sign-in could not be completed. Try again."
+        );
+      } else {
+        setHostedAuthErrorMessage(null);
+      }
+    }
+
+    const unsubscribe = subscribeToHostedAuthChanges((sessionState) => {
+      if (cancelled) {
+        return;
+      }
+
+      setHostedSessionUser(sessionState.user);
+      setHostedAuthStatus(sessionState.accessToken ? "signed_in" : "signed_out");
+      setHostedAuthDialogOpen(!sessionState.accessToken);
+      setHostedAuthPending(false);
+      if (sessionState.accessToken) {
+        setHostedAuthErrorMessage(null);
+      }
+
+      if (!sessionState.accessToken) {
+        setSettingsDialogOpen(false);
+        zeroCreditsDialogOpenedRef.current = false;
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [appMode]);
+
+  useEffect(() => {
     let cancelled = false;
 
     storageHydratedRef.current = false;
@@ -815,6 +945,14 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     resetUiState();
 
     if (appMode === "hosted") {
+      if (hostedAuthStatus !== "signed_in") {
+        applySnapshot(signedOutHostedSnapshot);
+        storageHydratedRef.current = true;
+        return () => {
+          cancelled = true;
+        };
+      }
+
       const request = beginHostedRequest();
 
       void fetchHostedSync({
@@ -858,7 +996,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
               ? error.message
               : "Hosted setup is incomplete."
           );
-          applySnapshot(seedSnapshot);
+          applySnapshot(signedOutHostedSnapshot);
           storageHydratedRef.current = true;
         });
 
@@ -912,8 +1050,10 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     cleanupPreviewUrls,
     clearAllTimers,
     seedSnapshot,
+    signedOutHostedSnapshot,
     abortHostedRequests,
     applyHostedResponse,
+    hostedAuthStatus,
     beginLocalRequest,
     beginHostedRequest,
     finishLocalRequest,
@@ -977,7 +1117,11 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   ]);
 
   useEffect(() => {
-    if (!storageHydratedRef.current || appMode !== "hosted") {
+    if (
+      !storageHydratedRef.current ||
+      appMode !== "hosted" ||
+      !hostedUserSignedIn
+    ) {
       return;
     }
 
@@ -1020,6 +1164,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   }, [
     appMode,
     gallerySizeLevel,
+    hostedUserSignedIn,
     visibleSelectedModelId,
     applyHostedResponse,
     beginHostedRequest,
@@ -1035,7 +1180,11 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   }, [appMode, providerSettings]);
 
   useEffect(() => {
-    if (appMode !== "hosted" || !storageHydratedRef.current) {
+    if (
+      appMode !== "hosted" ||
+      !storageHydratedRef.current ||
+      !hostedUserSignedIn
+    ) {
       return;
     }
 
@@ -1084,7 +1233,13 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [appMode, applyHostedResponse, beginHostedRequest, finishHostedRequest]);
+  }, [
+    appMode,
+    hostedUserSignedIn,
+    applyHostedResponse,
+    beginHostedRequest,
+    finishHostedRequest,
+  ]);
 
   useEffect(() => {
     if (appMode !== "local" || !storageHydratedRef.current) {
@@ -1380,8 +1535,44 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     } satisfies StudioHostedAccount;
   }, [activeCreditPack, appMode, creditBalance, hostedSetupMessage, profile, runs]);
 
+  useEffect(() => {
+    if (
+      appMode !== "hosted" ||
+      !hostedUserSignedIn ||
+      !creditBalance
+    ) {
+      zeroCreditsDialogOpenedRef.current = false;
+      return;
+    }
+
+    if (creditBalance.balanceCredits <= 0) {
+      if (!zeroCreditsDialogOpenedRef.current) {
+        setSettingsDialogOpen(true);
+        zeroCreditsDialogOpenedRef.current = true;
+      }
+      return;
+    }
+
+    zeroCreditsDialogOpenedRef.current = false;
+  }, [appMode, creditBalance, hostedUserSignedIn]);
+
+  const hostedSessionAvatarLabel =
+    String(
+      hostedSessionUser?.user_metadata.full_name ??
+        hostedSessionUser?.user_metadata.name ??
+        hostedSessionUser?.email ??
+        ""
+    )
+      .trim()
+      .slice(0, 1)
+      .toUpperCase() || "U";
+
   const accountButtonLabel =
-    appMode === "hosted" ? profile.avatarLabel || "U" : "T";
+    appMode === "hosted"
+      ? hostedUserSignedIn
+        ? profile.avatarLabel || hostedSessionAvatarLabel
+        : "G"
+      : "T";
 
   const updateModelConfiguration = useCallback(
     (enabledModelIds: string[]) => {
@@ -2332,6 +2523,31 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     []
   );
 
+  const openHostedAuthDialog = useCallback(() => {
+    setHostedAuthErrorMessage(null);
+    setHostedAuthDialogOpen(true);
+  }, []);
+
+  const signInWithGoogleHostedAccount = useCallback(async () => {
+    if (appMode !== "hosted" || hostedAuthPending) {
+      return;
+    }
+
+    setHostedAuthPending(true);
+    setHostedAuthErrorMessage(null);
+
+    try {
+      await signInWithGoogleHostedSession();
+    } catch (error) {
+      setHostedAuthPending(false);
+      setHostedAuthErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Google sign-in could not be started."
+      );
+    }
+  }, [appMode, hostedAuthPending]);
+
   const cancelRun = useCallback(
     (runId: string) => {
       const targetRun = runsRef.current.find((run) => run.id === runId);
@@ -2422,7 +2638,6 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
 
     await signOutHostedSession();
     setSettingsDialogOpen(false);
-    window.location.reload();
   }, [appMode]);
 
   const deleteHostedAccount = useCallback(async () => {
@@ -2440,7 +2655,6 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     }
 
     setSettingsDialogOpen(false);
-    window.location.reload();
   }, [appMode, beginHostedRequest, finishHostedRequest]);
 
   const setGallerySizeLevel = useCallback((value: number) => {
@@ -2459,6 +2673,11 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
 
     if (appMode === "local" && !hasFalKey) {
       setSettingsDialogOpen(true);
+      return;
+    }
+
+    if (appMode === "hosted" && !hostedUserSignedIn) {
+      setHostedAuthDialogOpen(true);
       return;
     }
 
@@ -2523,6 +2742,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     currentDraft,
     finishHostedRequest,
     hasFalKey,
+    hostedUserSignedIn,
     refreshLocalState,
     selectedFolderId,
     selectedModel,
@@ -2562,6 +2782,10 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     getPromptBarDropHint,
     hasFalKey,
     hostedAccount,
+    hostedAuthDialogOpen,
+    hostedAuthErrorMessage,
+    hostedAuthPending,
+    hostedUserSignedIn,
     items,
     modelConfiguration,
     modelSections: STUDIO_MODEL_SECTIONS,
@@ -2623,5 +2847,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     uploadFiles,
     deleteHostedAccount,
     signOutHostedAccount,
+    openHostedAuthDialog,
+    signInWithGoogleHostedAccount,
   };
 }

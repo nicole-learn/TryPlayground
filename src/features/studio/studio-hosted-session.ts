@@ -1,56 +1,78 @@
 "use client";
 
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
+import type { AuthChangeEvent, Session, User } from "@supabase/supabase-js";
 
-let ensureSessionPromise: Promise<string> | null = null;
+export interface HostedBrowserSessionState {
+  accessToken: string | null;
+  user: User | null;
+}
 
-async function createAnonymousHostedSession() {
+function mapHostedSession(session: Session | null): HostedBrowserSessionState {
+  return {
+    accessToken: session?.access_token ?? null,
+    user: session?.user ?? null,
+  };
+}
+
+export async function getHostedSessionState(): Promise<HostedBrowserSessionState> {
   const supabase = getSupabaseBrowserClient();
-  const { data, error } = await supabase.auth.signInAnonymously({
+  const {
+    data: { session },
+    error,
+  } = await supabase.auth.getSession();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return mapHostedSession(session);
+}
+
+export async function getHostedAccessToken() {
+  const sessionState = await getHostedSessionState();
+  return sessionState.accessToken;
+}
+
+export function subscribeToHostedAuthChanges(
+  callback: (sessionState: HostedBrowserSessionState, event: AuthChangeEvent) => void
+) {
+  const supabase = getSupabaseBrowserClient();
+  const {
+    data: { subscription },
+  } = supabase.auth.onAuthStateChange((event, session) => {
+    callback(mapHostedSession(session), event);
+  });
+
+  return () => {
+    subscription.unsubscribe();
+  };
+}
+
+export async function signInWithGoogleHostedSession(options?: {
+  nextPath?: string;
+}) {
+  const supabase = getSupabaseBrowserClient();
+  const currentPath =
+    options?.nextPath ??
+    (typeof window === "undefined"
+      ? "/"
+      : `${window.location.pathname}${window.location.search}${window.location.hash}`);
+  const redirectUrl = new URL("/auth/callback", window.location.origin);
+  redirectUrl.searchParams.set("next", currentPath.startsWith("/") ? currentPath : "/");
+
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
     options: {
-      data: {
-        display_name: "TryPlayground User",
+      redirectTo: redirectUrl.toString(),
+      queryParams: {
+        prompt: "select_account",
       },
     },
   });
 
-  if (error || !data.session?.access_token) {
-    throw new Error(
-      error?.message ??
-        "Hosted sign-in is unavailable. Enable anonymous users in Supabase Auth."
-    );
-  }
-
-  return data.session.access_token;
-}
-
-export async function ensureHostedAccessToken() {
-  if (ensureSessionPromise) {
-    return ensureSessionPromise;
-  }
-
-  ensureSessionPromise = (async () => {
-    const supabase = getSupabaseBrowserClient();
-    const {
-      data: { session },
-      error,
-    } = await supabase.auth.getSession();
-
-    if (error) {
-      throw new Error(error.message);
-    }
-
-    if (session?.access_token) {
-      return session.access_token;
-    }
-
-    return createAnonymousHostedSession();
-  })();
-
-  try {
-    return await ensureSessionPromise;
-  } finally {
-    ensureSessionPromise = null;
+  if (error) {
+    throw new Error(error.message);
   }
 }
 

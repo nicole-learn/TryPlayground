@@ -11,6 +11,7 @@ interface StudioTopBarProps {
   appMode: StudioAppMode;
   accountLabel?: string;
   hasFalKey: boolean;
+  hostedAuthenticated?: boolean;
   onClearSelection: () => void;
   onDeleteSelected: () => void;
   onDownloadSelected: () => void;
@@ -60,6 +61,7 @@ export function StudioTopBar({
   appMode,
   accountLabel,
   hasFalKey,
+  hostedAuthenticated = true,
   onClearSelection,
   onDeleteSelected,
   onDownloadSelected,
@@ -170,6 +172,7 @@ export function StudioTopBar({
         <StudioAccountButton
           appMode={appMode}
           hasFalKey={hasFalKey}
+          hostedAuthenticated={hostedAuthenticated}
           hostedLabel={accountLabel}
           onClick={onOpenAccount}
         />

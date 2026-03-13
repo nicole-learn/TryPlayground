@@ -21,6 +21,7 @@ interface StudioMobileRailProps {
   folderCounts: Record<string, number>;
   folders: StudioFolder[];
   hasFalKey: boolean;
+  hostedAuthenticated?: boolean;
   onClearSelection: () => void;
   onDownloadSelected: () => void;
   onDeleteSelected: () => void;
@@ -86,6 +87,7 @@ export function StudioMobileRail({
   folderCounts,
   folders,
   hasFalKey,
+  hostedAuthenticated = true,
   onClearSelection,
   onDownloadSelected,
   onDeleteSelected,
@@ -107,6 +109,7 @@ export function StudioMobileRail({
         <StudioAccountButton
           appMode={appMode}
           hasFalKey={hasFalKey}
+          hostedAuthenticated={hostedAuthenticated}
           hostedLabel={accountLabel}
           onClick={onOpenAccount}
         />

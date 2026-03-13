@@ -1,5 +1,7 @@
+import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import type { User } from "@supabase/supabase-js";
+import { cookies } from "next/headers";
 import type { Database } from "./database.types";
 import { getSupabaseEnv } from "./env";
 
@@ -25,6 +27,28 @@ export function createSupabaseUserServerClient(accessToken: string) {
     global: {
       headers: {
         Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  });
+}
+
+export async function createSupabaseRouteHandlerClient() {
+  const { publishableKey, url } = getSupabaseEnv();
+  const cookieStore = await cookies();
+
+  return createServerClient<Database>(url, publishableKey, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll(cookiesToSet) {
+        try {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            cookieStore.set(name, value, options);
+          });
+        } catch {
+          // Route handlers can write cookies. Ignore cases where Next disallows it.
+        }
       },
     },
   });

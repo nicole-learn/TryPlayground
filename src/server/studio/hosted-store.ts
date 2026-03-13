@@ -318,14 +318,43 @@ async function ensureHostedAccount(supabase: HostedSupabaseClient, user: User) {
     throw new Error(selectError.message);
   }
 
-  if (existingAccount) {
-    return existingAccount;
-  }
-
   const displayName =
+    String(user.user_metadata.full_name ?? "").trim() ||
+    String(user.user_metadata.name ?? "").trim() ||
     String(user.user_metadata.display_name ?? "").trim() ||
     (user.email?.split("@")[0] ?? "").trim() ||
     "TryPlayground User";
+  const avatarUrl =
+    String(user.user_metadata.avatar_url ?? "").trim() ||
+    String(user.user_metadata.picture ?? "").trim() ||
+    null;
+
+  if (existingAccount) {
+    if (
+      existingAccount.display_name !== displayName ||
+      existingAccount.avatar_url !== avatarUrl ||
+      existingAccount.avatar_label !== (displayName.slice(0, 1).toUpperCase() || "T")
+    ) {
+      const { data: updatedAccount, error: updateError } = await supabase
+        .from("studio_accounts")
+        .update({
+          display_name: displayName,
+          avatar_label: displayName.slice(0, 1).toUpperCase() || "T",
+          avatar_url: avatarUrl,
+        })
+        .eq("user_id", user.id)
+        .select("*")
+        .single();
+
+      if (updateError || !updatedAccount) {
+        throw new Error(updateError?.message ?? "Could not sync hosted account.");
+      }
+
+      return updatedAccount;
+    }
+
+    return existingAccount;
+  }
 
   const { data: insertedAccount, error: insertError } = await supabase
     .from("studio_accounts")
@@ -333,6 +362,7 @@ async function ensureHostedAccount(supabase: HostedSupabaseClient, user: User) {
       user_id: user.id,
       display_name: displayName,
       avatar_label: displayName.slice(0, 1).toUpperCase() || "T",
+      avatar_url: avatarUrl,
     })
     .select("*")
     .single();
