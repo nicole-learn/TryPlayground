@@ -108,57 +108,59 @@ export function FolderOptionsMenu({
   };
 
   return (
-    <div ref={menuRef} className={cn("relative", className)}>
-      <button
-        type="button"
-        onClick={(event) => {
-          event.stopPropagation();
-          setOpen((current) => !current);
-        }}
-        className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground transition hover:bg-white/[0.08] hover:text-foreground"
-        aria-label={`Open ${folderName} options`}
-        aria-expanded={open}
-        aria-haspopup="menu"
-      >
-        <EllipsisVertical className="size-3.5" />
-      </button>
-
-      {open ? (
-        <div
-          role="menu"
-          className="absolute right-0 top-[calc(100%+0.4rem)] z-30 w-48 rounded-[16px] border border-white/10 bg-[#080808]/95 p-1.5 shadow-[0_16px_40px_rgba(0,0,0,0.42)] backdrop-blur-xl"
-          onClick={(event) => event.stopPropagation()}
+    <div className={className}>
+      <div ref={menuRef} className="relative inline-flex items-center justify-center">
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            setOpen((current) => !current);
+          }}
+          className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground transition hover:bg-white/[0.08] hover:text-foreground"
+          aria-label={`Open ${folderName} options`}
+          aria-expanded={open}
+          aria-haspopup="menu"
         >
-          <MenuItem
-            icon={FolderOpen}
-            label="Open Folder"
-            onSelect={() => handleSelect(onOpenFolder)}
-          />
-          <MenuItem
-            icon={Download}
-            label="Download Folder"
-            disabled={!hasItems}
-            onSelect={() => handleSelect(onDownloadFolder)}
-          />
-          <MenuItem
-            icon={Pencil}
-            label="Rename Folder"
-            onSelect={() => handleSelect(onRenameFolder)}
-          />
-          <MenuItem
-            icon={Copy}
-            label="Copy Folder ID"
-            onSelect={() => handleSelect(onCopyFolderId)}
-          />
-          <div className="my-1 h-px bg-white/8" />
-          <MenuItem
-            destructive
-            icon={Trash2}
-            label="Delete Folder"
-            onSelect={() => handleSelect(onDeleteFolder)}
-          />
-        </div>
-      ) : null}
+          <EllipsisVertical className="size-3.5" />
+        </button>
+
+        {open ? (
+          <div
+            role="menu"
+            className="absolute right-0 top-[calc(100%+0.4rem)] z-30 w-48 rounded-[16px] border border-white/10 bg-[#080808] p-1.5 shadow-[0_16px_40px_rgba(0,0,0,0.42)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <MenuItem
+              icon={FolderOpen}
+              label="Open Folder"
+              onSelect={() => handleSelect(onOpenFolder)}
+            />
+            <MenuItem
+              icon={Download}
+              label="Download Folder"
+              disabled={!hasItems}
+              onSelect={() => handleSelect(onDownloadFolder)}
+            />
+            <MenuItem
+              icon={Pencil}
+              label="Rename Folder"
+              onSelect={() => handleSelect(onRenameFolder)}
+            />
+            <MenuItem
+              icon={Copy}
+              label="Copy Folder ID"
+              onSelect={() => handleSelect(onCopyFolderId)}
+            />
+            <div className="my-1 h-px bg-white/8" />
+            <MenuItem
+              destructive
+              icon={Trash2}
+              label="Delete Folder"
+              onSelect={() => handleSelect(onDeleteFolder)}
+            />
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
