@@ -3,7 +3,7 @@ import "server-only";
 import type Stripe from "stripe";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import type { Database, Json } from "@/lib/supabase/database.types";
-import { createSupabaseServiceRoleClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/server";
 import {
   getStripeKeyMode,
   getStripeWebhookSecret,
@@ -722,7 +722,7 @@ export async function completeHostedCreditCheckoutSession(params: {
   expectedUserId?: string;
 }) {
   const { stripe } = ensureStripeClient();
-  const supabase = createSupabaseServiceRoleClient();
+  const supabase = createSupabaseAdminClient();
   const session = await stripe.checkout.sessions.retrieve(params.checkoutSessionId);
 
   if (session.mode !== "payment") {
@@ -809,7 +809,7 @@ export async function handleHostedStripeWebhook(request: Request) {
 
   const rawBody = await request.text();
   const event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
-  const supabase = createSupabaseServiceRoleClient();
+  const supabase = createSupabaseAdminClient();
 
   const recorded = await recordStripeWebhookEvent({
     supabase,

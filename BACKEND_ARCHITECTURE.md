@@ -429,7 +429,7 @@ Recommended path shape:
 
 - Enable RLS on every public table.
 - Use the anon key only from the client.
-- Keep the service role on the server only.
+- Keep the Supabase secret key on the server only.
 - Protect storage with RLS on `storage.objects`.
 - Prefer user-scoped or workspace-scoped policies.
 - Keep all mutation authority server-side for credits, queue dispatch, and pricing.

@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import type { User } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import type { Database } from "./database.types";
-import { getSupabaseEnv, getSupabaseServiceRoleEnv } from "./env";
+import { getSupabaseAdminEnv, getSupabaseEnv } from "./env";
 
 export function getRequestBearerToken(request: Request) {
   const authorizationHeader = request.headers.get("authorization")?.trim() ?? "";
@@ -32,10 +32,10 @@ export function createSupabaseUserServerClient(accessToken: string) {
   });
 }
 
-export function createSupabaseServiceRoleClient() {
-  const { serviceRoleKey, url } = getSupabaseServiceRoleEnv();
+export function createSupabaseAdminClient() {
+  const { secretKey, url } = getSupabaseAdminEnv();
 
-  return createClient<Database>(url, serviceRoleKey, {
+  return createClient<Database>(url, secretKey, {
     auth: {
       autoRefreshToken: false,
       detectSessionInUrl: false,
