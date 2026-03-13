@@ -400,97 +400,99 @@ export function StudioSettingsDialog({
       open={open}
       title="Settings"
       hideHeader
-      panelClassName="max-w-[82rem] rounded-[32px]"
-      contentClassName="p-0"
+      panelClassName="flex h-[min(82vh,48rem)] max-w-[82rem] flex-col overflow-hidden rounded-[32px]"
+      contentClassName="flex min-h-0 flex-1 flex-col p-0"
       onClose={onClose}
     >
-      <div className="border-b border-white/8 pl-6 pr-4 pt-4 pb-5">
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-3">
-            <div className="text-2xl font-semibold tracking-tight text-white">
-              {appMode === "hosted" ? "Account" : "Provider Settings"}
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="shrink-0 border-b border-white/8 pl-6 pr-4 pt-4 pb-5">
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-3">
+              <div className="text-2xl font-semibold tracking-tight text-white">
+                {appMode === "hosted" ? "Account" : "Provider Settings"}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {appMode === "hosted" ? (
+                  <>
+                    <SettingsTabButton
+                      active={currentTab === "credits"}
+                      label="Credits"
+                      onClick={() => setHostedTab("credits")}
+                    />
+                    <SettingsTabButton
+                      active={currentTab === "models"}
+                      label="Model Configurations"
+                      onClick={() => setHostedTab("models")}
+                    />
+                    <SettingsTabButton
+                      active={currentTab === "account"}
+                      label="Account Information"
+                      onClick={() => setHostedTab("account")}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <SettingsTabButton
+                      active={currentTab === "api-key"}
+                      label="API Key"
+                      onClick={() => setLocalTab("api-key")}
+                    />
+                    <SettingsTabButton
+                      active={currentTab === "models"}
+                      label="Model Configuration"
+                      onClick={() => setLocalTab("models")}
+                    />
+                  </>
+                )}
+              </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {appMode === "hosted" ? (
-                <>
-                  <SettingsTabButton
-                    active={currentTab === "credits"}
-                    label="Credits"
-                    onClick={() => setHostedTab("credits")}
-                  />
-                  <SettingsTabButton
-                    active={currentTab === "models"}
-                    label="Model Configurations"
-                    onClick={() => setHostedTab("models")}
-                  />
-                  <SettingsTabButton
-                    active={currentTab === "account"}
-                    label="Account Information"
-                    onClick={() => setHostedTab("account")}
-                  />
-                </>
-              ) : (
-                <>
-                  <SettingsTabButton
-                    active={currentTab === "api-key"}
-                    label="API Key"
-                    onClick={() => setLocalTab("api-key")}
-                  />
-                  <SettingsTabButton
-                    active={currentTab === "models"}
-                    label="Model Configuration"
-                    onClick={() => setLocalTab("models")}
-                  />
-                </>
-              )}
-            </div>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex size-9 items-center justify-center self-start rounded-full border border-white/10 bg-white/[0.03] text-white/72 transition hover:border-white/20 hover:bg-white/[0.06] hover:text-white"
+              aria-label="Close settings"
+            >
+              <X className="size-[18px]" />
+            </button>
           </div>
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex size-9 items-center justify-center self-start rounded-full border border-white/10 bg-white/[0.03] text-white/72 transition hover:border-white/20 hover:bg-white/[0.06] hover:text-white"
-            aria-label="Close settings"
-          >
-            <X className="size-[18px]" />
-          </button>
         </div>
-      </div>
 
-      <div className="px-6 py-6">
-        {appMode === "hosted" ? (
-          hostedTab === "credits" && hostedAccount ? (
-            <CreditsTab
-              account={hostedAccount}
-              purchaseErrorMessage={purchaseErrorMessage}
-              purchasePending={purchasePending}
-              onPurchaseCredits={onPurchaseCredits}
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+          {appMode === "hosted" ? (
+            hostedTab === "credits" && hostedAccount ? (
+              <CreditsTab
+                account={hostedAccount}
+                purchaseErrorMessage={purchaseErrorMessage}
+                purchasePending={purchasePending}
+                onPurchaseCredits={onPurchaseCredits}
+              />
+            ) : hostedTab === "models" ? (
+              <ModelConfigurationTab
+                modelConfiguration={modelConfiguration}
+                onToggleModelEnabled={onToggleModelEnabled}
+              />
+            ) : hostedAccount ? (
+              <AccountInformationTab
+                account={hostedAccount}
+                onDeleteAccount={onDeleteAccount}
+                onSignOut={onSignOut}
+              />
+            ) : null
+          ) : localTab === "api-key" ? (
+            <ApiKeyTab
+              key={`${providerSettings.falApiKey}:${providerSettings.lastValidatedAt ?? "none"}`}
+              initialValues={providerSettings}
+              providerConnectionStatus={providerConnectionStatus}
+              onSave={onSaveProviderSettings}
             />
-          ) : hostedTab === "models" ? (
+          ) : (
             <ModelConfigurationTab
               modelConfiguration={modelConfiguration}
               onToggleModelEnabled={onToggleModelEnabled}
             />
-          ) : hostedAccount ? (
-            <AccountInformationTab
-              account={hostedAccount}
-              onDeleteAccount={onDeleteAccount}
-              onSignOut={onSignOut}
-            />
-          ) : null
-        ) : localTab === "api-key" ? (
-          <ApiKeyTab
-            key={`${providerSettings.falApiKey}:${providerSettings.lastValidatedAt ?? "none"}`}
-            initialValues={providerSettings}
-            providerConnectionStatus={providerConnectionStatus}
-            onSave={onSaveProviderSettings}
-          />
-        ) : (
-          <ModelConfigurationTab
-            modelConfiguration={modelConfiguration}
-            onToggleModelEnabled={onToggleModelEnabled}
-          />
-        )}
+          )}
+        </div>
       </div>
     </ModalShell>
   );
