@@ -4,8 +4,16 @@ import {
   getStudioModelsForPromptBar,
 } from "./studio-model-catalog";
 
+const DEFAULT_STUDIO_ENABLED_MODEL_IDS = [
+  "nano-banana-2",
+  "gemini-2.5-flash",
+  "veo-3.1",
+  "claude-opus-4.6",
+];
+
 export function createDefaultStudioEnabledModelIds() {
-  return getStudioModelIds();
+  const validIdSet = new Set(getStudioModelIds());
+  return DEFAULT_STUDIO_ENABLED_MODEL_IDS.filter((modelId) => validIdSet.has(modelId));
 }
 
 export function normalizeStudioEnabledModelIds(
@@ -13,11 +21,12 @@ export function normalizeStudioEnabledModelIds(
 ) {
   const validIds = getStudioModelIds();
   const validIdSet = new Set(validIds);
+  const defaultIds = createDefaultStudioEnabledModelIds();
   const dedupedValidIds = Array.from(
     new Set((enabledModelIds ?? []).filter((modelId) => validIdSet.has(modelId)))
   );
 
-  return dedupedValidIds.length > 0 ? dedupedValidIds : validIds;
+  return dedupedValidIds.length > 0 ? dedupedValidIds : defaultIds;
 }
 
 export function getConfiguredStudioModels(enabledModelIds: string[]) {
