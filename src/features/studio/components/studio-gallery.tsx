@@ -95,7 +95,7 @@ function getRunCardSurfaceClassName(kind: GenerationRun["kind"]) {
 function getRunStatusVisual(status: GenerationRun["status"]): CardStatusVisual {
   if (status === "processing") {
     return {
-      badgeClassName: "border-primary/30 bg-primary/14 text-primary-foreground/94",
+      badgeClassName: "border-primary/30 bg-primary/14 text-primary",
       icon: Loader2,
       label: "Generating",
     };
