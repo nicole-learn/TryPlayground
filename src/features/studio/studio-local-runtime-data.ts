@@ -11,6 +11,8 @@ import type {
   StudioModelKind,
 } from "./types";
 
+export const LOCAL_STUDIO_WORKSPACE_ID = "workspace-local";
+
 export function createStudioId(prefix: string) {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return `${prefix}-${crypto.randomUUID()}`;
@@ -86,6 +88,14 @@ function createPreviewSvg({
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
+function getPreviewBackgroundPairs(): Record<StudioModelKind, string> {
+  return {
+    image: "#38bdf8|#0f172a",
+    video: "#0ea5e9|#082f49",
+    text: "#60a5fa|#1e1b4b",
+  };
+}
+
 function parseAspectRatioValue(value: string): number {
   const [width, height] = value.split(":").map((part) => Number(part));
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
@@ -100,13 +110,10 @@ export function createGeneratedLibraryItem(params: {
   draft: StudioDraft;
   createdAt: string;
   folderId: string | null;
+  runId?: string | null;
 }): LibraryItem {
   const title = params.draft.prompt.trim().slice(0, 40) || params.model.name;
-  const backgroundPairs: Record<StudioModelKind, string> = {
-    image: "#f97316|#7c3aed",
-    video: "#22c55e|#0ea5e9",
-    text: "#6366f1|#8b5cf6",
-  };
+  const backgroundPairs = getPreviewBackgroundPairs();
 
   if (params.model.kind === "text") {
     const body = [
@@ -117,39 +124,55 @@ export function createGeneratedLibraryItem(params: {
 
     return {
       id: createStudioId("asset"),
+      workspaceId: LOCAL_STUDIO_WORKSPACE_ID,
       title,
       kind: "text",
       source: "generated",
       role: "generated_output",
       previewUrl: null,
+      thumbnailUrl: null,
       contentText: body,
       createdAt: params.createdAt,
+      updatedAt: params.createdAt,
       modelId: params.model.id,
+      runId: params.runId ?? null,
+      provider: "fal",
+      status: "ready",
       prompt: params.draft.prompt,
       meta: `${params.model.name} • ${params.draft.maxTokens} max tokens • ${params.draft.tone}`,
       aspectRatio: 0.82,
       folderId: params.folderId,
+      storagePath: null,
       mimeType: "text/plain",
       byteSize: body.length,
+      errorMessage: null,
     };
   }
 
+  const previewUrl = createPreviewSvg({
+    title: params.model.name,
+    subtitle:
+      params.draft.prompt.trim() || "Fal-powered generation preview placeholder",
+    kind: params.model.kind,
+    background: backgroundPairs[params.model.kind],
+  });
+
   return {
     id: createStudioId("asset"),
+    workspaceId: LOCAL_STUDIO_WORKSPACE_ID,
     title,
     kind: params.model.kind,
     source: "generated",
     role: "generated_output",
-    previewUrl: createPreviewSvg({
-      title: params.model.name,
-      subtitle:
-        params.draft.prompt.trim() || "Fal-powered generation preview placeholder",
-      kind: params.model.kind,
-      background: backgroundPairs[params.model.kind],
-    }),
+    previewUrl,
+    thumbnailUrl: previewUrl,
     contentText: null,
     createdAt: params.createdAt,
+    updatedAt: params.createdAt,
     modelId: params.model.id,
+    runId: params.runId ?? null,
+    provider: "fal",
+    status: "ready",
     prompt: params.draft.prompt,
     meta:
       params.model.kind === "image"
@@ -157,8 +180,10 @@ export function createGeneratedLibraryItem(params: {
         : `${params.model.name} • ${params.draft.durationSeconds}s • ${params.draft.resolution}`,
     aspectRatio: parseAspectRatioValue(params.draft.aspectRatio),
     folderId: params.folderId,
+    storagePath: null,
     mimeType: params.model.kind === "video" ? "video/mp4" : "image/png",
     byteSize: null,
+    errorMessage: null,
   };
 }
 
@@ -177,12 +202,49 @@ export function createGenerationRunSummary(
   return `${draft.tone} • ${draft.maxTokens} max tokens`;
 }
 
+export function createGenerationRunPreviewUrl(
+  model: StudioModelDefinition,
+  draft: StudioDraft
+) {
+  return createPreviewSvg({
+    title: model.name,
+    subtitle:
+      draft.prompt.trim() ||
+      (model.kind === "text"
+        ? "Queued workspace text generation"
+        : "Queued workspace media generation"),
+    kind: model.kind,
+    background: getPreviewBackgroundPairs()[model.kind],
+  });
+}
+
 function createSeedFolders() {
   const now = new Date().toISOString();
   return [
-    { id: createStudioId("folder"), name: "References", createdAt: now },
-    { id: createStudioId("folder"), name: "Prompts", createdAt: now },
-    { id: createStudioId("folder"), name: "Concepts", createdAt: now },
+    {
+      id: createStudioId("folder"),
+      workspaceId: LOCAL_STUDIO_WORKSPACE_ID,
+      name: "References",
+      createdAt: now,
+      updatedAt: now,
+      sortOrder: 0,
+    },
+    {
+      id: createStudioId("folder"),
+      workspaceId: LOCAL_STUDIO_WORKSPACE_ID,
+      name: "Prompts",
+      createdAt: now,
+      updatedAt: now,
+      sortOrder: 1,
+    },
+    {
+      id: createStudioId("folder"),
+      workspaceId: LOCAL_STUDIO_WORKSPACE_ID,
+      name: "Concepts",
+      createdAt: now,
+      updatedAt: now,
+      sortOrder: 2,
+    },
   ] satisfies StudioFolder[];
 }
 
@@ -208,14 +270,20 @@ function createMockUploadedSeedItem(params: {
 
   return {
     id: createStudioId("asset"),
+    workspaceId: LOCAL_STUDIO_WORKSPACE_ID,
     title: params.title,
     kind: params.kind,
     source: "uploaded",
     role: params.kind === "text" ? "text_note" : "uploaded_source",
     previewUrl,
+    thumbnailUrl: previewUrl,
     contentText: params.kind === "text" ? params.prompt : null,
     createdAt: params.createdAt,
+    updatedAt: params.createdAt,
     modelId: null,
+    runId: null,
+    provider: "fal",
+    status: "ready",
     prompt: params.prompt,
     meta:
       params.kind === "text"
@@ -226,6 +294,7 @@ function createMockUploadedSeedItem(params: {
     aspectRatio:
       params.kind === "video" ? 16 / 9 : params.kind === "image" ? 4 / 5 : 0.82,
     folderId: params.folderId,
+    storagePath: null,
     mimeType:
       params.kind === "text"
         ? "text/plain"
@@ -233,7 +302,48 @@ function createMockUploadedSeedItem(params: {
           ? "video/mp4"
           : "image/png",
     byteSize: params.prompt.length * 32,
+    errorMessage: null,
   };
+}
+
+function createMockGenerationRun(params: {
+  createdAt: string;
+  draft: StudioDraft;
+  errorMessage?: string | null;
+  folderId: string | null;
+  model: StudioModelDefinition;
+  progressPercent?: number | null;
+  status: GenerationRun["status"];
+}) {
+  return {
+    id: createStudioId("run"),
+    workspaceId: LOCAL_STUDIO_WORKSPACE_ID,
+    folderId: params.folderId,
+    modelId: params.model.id,
+    modelName: params.model.name,
+    kind: params.model.kind,
+    provider: "fal",
+    requestMode:
+      params.model.kind === "image"
+        ? "text-to-image"
+        : params.model.kind === "video"
+          ? "text-to-video"
+          : "chat",
+    status: params.status,
+    prompt: params.draft.prompt,
+    createdAt: params.createdAt,
+    startedAt:
+      params.status === "processing" || params.status === "completed"
+        ? params.createdAt
+        : null,
+    completedAt: params.status === "completed" ? params.createdAt : null,
+    summary: createGenerationRunSummary(params.model, params.draft),
+    outputAssetId: null,
+    previewUrl: createGenerationRunPreviewUrl(params.model, params.draft),
+    progressPercent: params.progressPercent ?? null,
+    errorMessage: params.errorMessage ?? null,
+    draftSnapshot: createDraftSnapshot(params.draft),
+  } satisfies GenerationRun;
 }
 
 export function buildStudioDraftMap() {
@@ -271,7 +381,14 @@ export function createStudioSeedState() {
     new Date(now - 1000 * 60 * 92).toISOString(),
     new Date(now - 1000 * 60 * 128).toISOString(),
     new Date(now - 1000 * 60 * 172).toISOString(),
+    new Date(now - 1000 * 60 * 4).toISOString(),
+    new Date(now - 1000 * 60 * 7).toISOString(),
+    new Date(now - 1000 * 60 * 9).toISOString(),
   ];
+
+  const completedImageRunId = createStudioId("run");
+  const completedVideoRunId = createStudioId("run");
+  const completedTextRunId = createStudioId("run");
 
   const items = [
     createGeneratedLibraryItem({
@@ -279,18 +396,21 @@ export function createStudioSeedState() {
       draft: imageDraft,
       createdAt: createdAt[0],
       folderId: folders[0].id,
+      runId: completedImageRunId,
     }),
     createGeneratedLibraryItem({
       model: videoModel,
       draft: videoDraft,
       createdAt: createdAt[1],
       folderId: folders[1].id,
+      runId: completedVideoRunId,
     }),
     createGeneratedLibraryItem({
       model: textModel,
       draft: textDraft,
       createdAt: createdAt[2],
       folderId: folders[2].id,
+      runId: completedTextRunId,
     }),
     createMockUploadedSeedItem({
       title: "Desk composition reference",
@@ -318,41 +438,101 @@ export function createStudioSeedState() {
 
   const runs: GenerationRun[] = [
     {
-      id: createStudioId("run"),
+      id: completedImageRunId,
+      workspaceId: LOCAL_STUDIO_WORKSPACE_ID,
+      folderId: folders[0].id,
       modelId: imageModel.id,
       modelName: imageModel.name,
       kind: imageModel.kind,
+      provider: "fal",
+      requestMode: "text-to-image",
       status: "completed",
       prompt: imageDraft.prompt,
       createdAt: createdAt[0],
+      startedAt: createdAt[0],
+      completedAt: createdAt[0],
       summary: createGenerationRunSummary(imageModel, imageDraft),
-      outputItemId: items[0].id,
+      outputAssetId: items[0].id,
+      previewUrl: items[0].thumbnailUrl,
+      progressPercent: 100,
+      errorMessage: null,
       draftSnapshot: createDraftSnapshot(imageDraft),
     },
     {
-      id: createStudioId("run"),
+      id: completedVideoRunId,
+      workspaceId: LOCAL_STUDIO_WORKSPACE_ID,
+      folderId: folders[1].id,
       modelId: videoModel.id,
       modelName: videoModel.name,
       kind: videoModel.kind,
+      provider: "fal",
+      requestMode: "text-to-video",
       status: "completed",
       prompt: videoDraft.prompt,
       createdAt: createdAt[1],
+      startedAt: createdAt[1],
+      completedAt: createdAt[1],
       summary: createGenerationRunSummary(videoModel, videoDraft),
-      outputItemId: items[1].id,
+      outputAssetId: items[1].id,
+      previewUrl: items[1].thumbnailUrl,
+      progressPercent: 100,
+      errorMessage: null,
       draftSnapshot: createDraftSnapshot(videoDraft),
     },
     {
-      id: createStudioId("run"),
+      id: completedTextRunId,
+      workspaceId: LOCAL_STUDIO_WORKSPACE_ID,
+      folderId: folders[2].id,
       modelId: textModel.id,
       modelName: textModel.name,
       kind: textModel.kind,
+      provider: "fal",
+      requestMode: "chat",
       status: "completed",
       prompt: textDraft.prompt,
       createdAt: createdAt[2],
+      startedAt: createdAt[2],
+      completedAt: createdAt[2],
       summary: createGenerationRunSummary(textModel, textDraft),
-      outputItemId: items[2].id,
+      outputAssetId: items[2].id,
+      previewUrl: null,
+      progressPercent: 100,
+      errorMessage: null,
       draftSnapshot: createDraftSnapshot(textDraft),
     },
+    createMockGenerationRun({
+      createdAt: createdAt[6],
+      draft: {
+        ...createDraft(imageModel),
+        prompt: "High-gloss studio product shot of a mineral water bottle with drifting condensation",
+      },
+      folderId: null,
+      model: imageModel,
+      progressPercent: 8,
+      status: "queued",
+    }),
+    createMockGenerationRun({
+      createdAt: createdAt[7],
+      draft: {
+        ...createDraft(videoModel),
+        prompt: "Floating camera pass through a luxury hotel lobby with reflective marble and warm daylight",
+      },
+      folderId: null,
+      model: videoModel,
+      progressPercent: 62,
+      status: "processing",
+    }),
+    createMockGenerationRun({
+      createdAt: createdAt[8],
+      draft: {
+        ...createDraft(textModel),
+        prompt: "Draft five launch angles for a creator-focused AI studio and force a fail state",
+      },
+      errorMessage: "Mock Fal response timeout while generating text output.",
+      folderId: folders[1].id,
+      model: textModel,
+      status: "failed",
+    }),
   ];
 
   return { folders, items, runs };

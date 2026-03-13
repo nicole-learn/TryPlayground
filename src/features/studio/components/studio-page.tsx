@@ -49,7 +49,7 @@ export function StudioPage({
     itemIds: string[];
     leadItem: Pick<
       LibraryItem,
-      "id" | "kind" | "title" | "previewUrl" | "contentText" | "prompt"
+      "id" | "kind" | "title" | "previewUrl" | "mimeType" | "contentText" | "prompt"
     >;
     x: number;
     y: number;
@@ -180,6 +180,7 @@ export function StudioPage({
         kind: params.leadItem.kind,
         title: params.leadItem.title,
         previewUrl: params.leadItem.previewUrl,
+        mimeType: params.leadItem.mimeType,
         contentText: params.leadItem.contentText,
         prompt: params.leadItem.prompt,
       },
@@ -196,7 +197,7 @@ export function StudioPage({
       emptyStateActionLabel="Upload Assets"
       emptyStateLabel="Generate or Upload an asset to get started"
       items={studio.ungroupedItems}
-      pendingRuns={studio.pendingRuns}
+      runCards={studio.ungroupedRunCards}
       selectedItemIdSet={studio.selectedItemIdSet}
       selectionModeEnabled={studio.selectionModeEnabled}
       sizeLevel={studio.gallerySizeLevel}
@@ -224,6 +225,7 @@ export function StudioPage({
       emptyStateActionLabel="Upload Assets"
       emptyStateLabel="Drag or Upload an asset into this folder to see it here"
       items={studio.selectedFolderItems}
+      runCards={studio.selectedFolderRunCards}
       selectedItemIdSet={studio.selectedItemIdSet}
       selectionModeEnabled={studio.selectionModeEnabled}
       sizeLevel={studio.gallerySizeLevel}

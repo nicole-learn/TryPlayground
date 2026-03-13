@@ -1,9 +1,30 @@
 "use client";
 
-import { createStudioId } from "./studio-local-runtime-data";
-import type { DraftReference, LibraryItem, StudioFolder } from "./types";
+import {
+  createStudioId,
+  LOCAL_STUDIO_WORKSPACE_ID,
+} from "./studio-local-runtime-data";
+import type {
+  DraftReference,
+  LibraryItem,
+  StudioFolder,
+  StudioReferenceInputKind,
+  StudioRunStatus,
+} from "./types";
 
 export const STUDIO_MEDIA_UPLOAD_ACCEPT = "image/*,video/*";
+
+const AUDIO_EXTENSIONS = new Set([
+  "mp3",
+  "wav",
+  "m4a",
+  "aac",
+  "ogg",
+  "flac",
+  "aiff",
+  "aif",
+  "opus",
+]);
 
 function sanitizeFileName(rawValue: string) {
   return rawValue
@@ -75,6 +96,29 @@ export function isReferenceEligibleLibraryItem(item: LibraryItem) {
   return item.kind === "image" || item.kind === "video";
 }
 
+export function getReferenceInputKindFromFile(
+  file: Pick<File, "name" | "type">
+): StudioReferenceInputKind {
+  const mimeType = file.type.trim().toLowerCase();
+  const extension = file.name.trim().toLowerCase().split(".").pop() ?? null;
+
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType.startsWith("video/")) return "video";
+  if (mimeType.startsWith("audio/")) return "audio";
+  if (
+    mimeType === "application/pdf" ||
+    mimeType === "text/plain" ||
+    mimeType === "text/markdown" ||
+    mimeType === "text/csv" ||
+    mimeType === "application/json"
+  ) {
+    return "document";
+  }
+
+  if (extension && AUDIO_EXTENSIONS.has(extension)) return "audio";
+  return "document";
+}
+
 export function getLibraryItemPromptText(item: LibraryItem) {
   const textValue = item.contentText?.trim() || item.prompt.trim() || item.title.trim();
   return textValue || null;
@@ -132,6 +176,70 @@ export function mergeDraftReferences(
   return mergedReferences;
 }
 
+export function releaseDraftReferencePreview(reference: DraftReference) {
+  if (reference.previewSource !== "owned") {
+    return;
+  }
+
+  revokePreviewUrl(reference.previewUrl);
+}
+
+export function releaseRemovedDraftReferencePreviews(
+  currentReferences: DraftReference[],
+  nextReferences: DraftReference[]
+) {
+  const nextReferenceIds = new Set(nextReferences.map((reference) => reference.id));
+
+  for (const reference of currentReferences) {
+    if (!nextReferenceIds.has(reference.id)) {
+      releaseDraftReferencePreview(reference);
+    }
+  }
+}
+
+export function createDraftReferenceFromFile(file: File): DraftReference {
+  const kind = getReferenceInputKindFromFile(file);
+  const previewUrl =
+    kind === "image" || kind === "video" ? URL.createObjectURL(file) : null;
+
+  return {
+    id: createStudioId("ref"),
+    file,
+    source: "upload",
+    originAssetId: null,
+    title: file.name,
+    kind,
+    mimeType: file.type || null,
+    previewUrl,
+    previewSource: previewUrl ? "owned" : "none",
+  };
+}
+
+export function createDraftReferenceFromLibraryItem(params: {
+  file: File;
+  item: LibraryItem;
+}): DraftReference {
+  const kind =
+    params.item.kind === "text" ? "document" : params.item.kind;
+  const previewUrl = params.item.thumbnailUrl ?? params.item.previewUrl;
+
+  return {
+    id: createStudioId("ref"),
+    file: params.file,
+    source: "library-item",
+    originAssetId: params.item.id,
+    title: params.item.title,
+    kind,
+    mimeType: params.item.mimeType,
+    previewUrl,
+    previewSource: previewUrl ? "asset" : "none",
+  };
+}
+
+export function isInFlightStudioRunStatus(status: StudioRunStatus) {
+  return status === "pending" || status === "queued" || status === "processing";
+}
+
 export async function resolveLibraryItemToReferenceFile(
   item: LibraryItem
 ): Promise<File | null> {
@@ -146,9 +254,11 @@ export async function resolveLibraryItemToReferenceFile(
   });
   const fileName = `${baseFileName}.${extension}`;
 
-  if (item.previewUrl) {
+  const sourcePreviewUrl = item.thumbnailUrl ?? item.previewUrl;
+
+  if (sourcePreviewUrl) {
     try {
-      const response = await fetch(item.previewUrl);
+      const response = await fetch(sourcePreviewUrl);
       const blob = await response.blob();
       const mimeType = blob.type || item.mimeType || getFallbackMimeType(item);
       return new File([blob], fileName, {
@@ -192,23 +302,32 @@ export function createTextLibraryItem(params: {
 }): LibraryItem {
   const trimmedBody = params.body.trim();
   const fallbackTitle = trimmedBody.slice(0, 36) || "Text note";
+  const timestamp = new Date().toISOString();
 
   return {
     id: createStudioId("asset"),
+    workspaceId: LOCAL_STUDIO_WORKSPACE_ID,
     title: params.title.trim() || fallbackTitle,
     kind: "text",
     source: "uploaded",
     role: "text_note",
     previewUrl: null,
+    thumbnailUrl: null,
     contentText: trimmedBody,
-    createdAt: new Date().toISOString(),
+    createdAt: timestamp,
+    updatedAt: timestamp,
     modelId: null,
+    runId: null,
+    provider: "fal",
+    status: "ready",
     prompt: trimmedBody,
     meta: "Text note",
     aspectRatio: 0.82,
     folderId: params.folderId,
+    storagePath: null,
     mimeType: "text/plain",
     byteSize: trimmedBody.length,
+    errorMessage: null,
   };
 }
 
@@ -229,23 +348,32 @@ export function createUploadedLibraryItem(
 
   const previewUrl = URL.createObjectURL(file);
   const aspectRatio = kind === "video" ? 16 / 9 : 4 / 5;
+  const timestamp = new Date().toISOString();
 
   return {
     id: createStudioId("asset"),
+    workspaceId: LOCAL_STUDIO_WORKSPACE_ID,
     title: file.name,
     kind,
     source: "uploaded",
     role: "uploaded_source",
     previewUrl,
+    thumbnailUrl: previewUrl,
     contentText: null,
-    createdAt: new Date().toISOString(),
+    createdAt: timestamp,
+    updatedAt: timestamp,
     modelId: null,
+    runId: null,
+    provider: "fal",
+    status: "ready",
     prompt: "",
     meta: `${file.type || "File"} • ${(file.size / 1024 / 1024).toFixed(1)} MB`,
     aspectRatio,
     folderId,
+    storagePath: null,
     mimeType: file.type || null,
     byteSize: file.size,
+    errorMessage: null,
   };
 }
 

@@ -12,18 +12,25 @@ import {
   createDraft,
   createDraftSnapshot,
   createGeneratedLibraryItem,
+  createGenerationRunPreviewUrl,
   createGenerationRunSummary,
   createStudioId,
   createStudioSeedState,
+  LOCAL_STUDIO_WORKSPACE_ID,
 } from "./studio-local-runtime-data";
 import {
   appendLibraryItemsToPrompt,
+  createDraftReferenceFromFile,
+  createDraftReferenceFromLibraryItem,
   createFolderItemCounts,
   createTextLibraryItem,
   createUploadedLibraryItem,
   hasFolderNameConflict,
+  isInFlightStudioRunStatus,
   isReferenceEligibleLibraryItem,
   mergeDraftReferences,
+  releaseDraftReferencePreview,
+  releaseRemovedDraftReferencePreviews,
   releaseUploadedPreview,
   resolveLibraryItemToReferenceFile,
   removePendingTimerId,
@@ -54,6 +61,7 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
   const initialStudioState = useMemo(() => createStudioSeedState(), []);
   const previewUrlsRef = useRef(new Map<string, string>());
   const pendingTimersRef = useRef<number[]>([]);
+  const draftsByModelIdRef = useRef(buildStudioDraftMap());
 
   const [models] = useState(STUDIO_MODEL_CATALOG);
   const [selectedModelId, setSelectedModelId] = useState(
@@ -87,6 +95,10 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
   const [createTextBody, setCreateTextBody] = useState("");
 
   useEffect(() => {
+    draftsByModelIdRef.current = draftsByModelId;
+  }, [draftsByModelId]);
+
+  useEffect(() => {
     saveStoredGridDensity(gallerySizeLevel);
   }, [gallerySizeLevel]);
 
@@ -110,6 +122,12 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
 
       for (const timerId of pendingTimers) {
         window.clearTimeout(timerId);
+      }
+
+      for (const draft of Object.values(draftsByModelIdRef.current)) {
+        for (const reference of draft.references) {
+          releaseDraftReferencePreview(reference);
+        }
       }
     };
   }, []);
@@ -140,10 +158,33 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
     return items.filter((item) => item.folderId === selectedFolderId);
   }, [items, selectedFolderId]);
 
-  const pendingRuns = useMemo(
-    () => runs.filter((run) => run.status === "running" && !run.outputItemId),
+  const ungroupedRunCards = useMemo(
+    () =>
+      runs.filter(
+        (run) =>
+          run.folderId === null &&
+          run.outputAssetId === null &&
+          (isInFlightStudioRunStatus(run.status) ||
+            run.status === "failed" ||
+            run.status === "cancelled")
+      ),
     [runs]
   );
+
+  const selectedFolderRunCards = useMemo(() => {
+    if (!selectedFolderId) {
+      return [];
+    }
+
+    return runs.filter(
+      (run) =>
+        run.folderId === selectedFolderId &&
+        run.outputAssetId === null &&
+        (isInFlightStudioRunStatus(run.status) ||
+          run.status === "failed" ||
+          run.status === "cancelled")
+    );
+  }, [runs, selectedFolderId]);
 
   const folderCounts = useMemo(
     () => createFolderItemCounts(folders, items),
@@ -183,6 +224,36 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
     [selectedModel]
   );
 
+  const replaceDraftReferences = useCallback(
+    (
+      nextReferencesOrUpdater:
+        | DraftReference[]
+        | ((currentReferences: DraftReference[]) => DraftReference[])
+    ) => {
+      setDraftsByModelId((current) => {
+        const existingDraft = current[selectedModel.id] ?? createDraft(selectedModel);
+        const nextReferences =
+          typeof nextReferencesOrUpdater === "function"
+            ? nextReferencesOrUpdater(existingDraft.references)
+            : nextReferencesOrUpdater;
+
+        releaseRemovedDraftReferencePreviews(
+          existingDraft.references,
+          nextReferences
+        );
+
+        return {
+          ...current,
+          [selectedModel.id]: {
+            ...existingDraft,
+            references: nextReferences,
+          },
+        };
+      });
+    },
+    [selectedModel]
+  );
+
   const addDraftReferences = useCallback(
     (nextReferences: DraftReference[]) => {
       const mergedReferences = mergeDraftReferences(
@@ -191,9 +262,16 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
         maxReferenceFiles
       );
 
-      updateDraft({
-        references: mergedReferences,
-      });
+      const keptReferenceIds = new Set(
+        mergedReferences.map((reference) => reference.id)
+      );
+      for (const reference of nextReferences) {
+        if (!keptReferenceIds.has(reference.id)) {
+          releaseDraftReferencePreview(reference);
+        }
+      }
+
+      replaceDraftReferences(mergedReferences);
 
       return {
         addedCount: Math.max(
@@ -203,19 +281,14 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
         maxReached: mergedReferences.length >= maxReferenceFiles,
       };
     },
-    [currentDraft.references, maxReferenceFiles, updateDraft]
+    [currentDraft.references, maxReferenceFiles, replaceDraftReferences]
   );
 
   const addReferences = useCallback(
     (files: File[]) => {
       if (files.length === 0) return;
 
-      const nextReferences: DraftReference[] = files.map((file) => ({
-        id: createStudioId("ref"),
-        file,
-        source: "upload",
-        originAssetId: null,
-      }));
+      const nextReferences = files.map(createDraftReferenceFromFile);
 
       addDraftReferences(nextReferences);
     },
@@ -224,13 +297,11 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
 
   const removeReference = useCallback(
     (referenceId: string) => {
-      updateDraft({
-        references: currentDraft.references.filter(
-          (reference) => reference.id !== referenceId
-        ),
-      });
+      replaceDraftReferences((currentReferences) =>
+        currentReferences.filter((reference) => reference.id !== referenceId)
+      );
     },
-    [currentDraft.references, updateDraft]
+    [replaceDraftReferences]
   );
 
   const getPromptBarDropHint = useCallback(
@@ -294,12 +365,10 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
               const file = await resolveLibraryItemToReferenceFile(item);
               if (!file) return null;
 
-              return {
-                id: createStudioId("ref"),
+              return createDraftReferenceFromLibraryItem({
                 file,
-                source: "library-item" as const,
-                originAssetId: item.id,
-              };
+                item,
+              });
             })
           );
 
@@ -408,13 +477,26 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
     }
 
     if (folderEditorMode === "create") {
+      const createdAt = new Date().toISOString();
       const nextFolder: StudioFolder = {
         id: createStudioId("folder"),
+        workspaceId: LOCAL_STUDIO_WORKSPACE_ID,
         name: nextName,
-        createdAt: new Date().toISOString(),
+        createdAt,
+        updatedAt: createdAt,
+        sortOrder: 0,
       };
 
-      setFolders((current) => [nextFolder, ...current]);
+      setFolders((current) => [
+        {
+          ...nextFolder,
+          sortOrder: 0,
+        },
+        ...current.map((folder, index) => ({
+          ...folder,
+          sortOrder: index + 1,
+        })),
+      ]);
       setSelectedFolderId(nextFolder.id);
       resetFolderEditor();
       return;
@@ -425,7 +507,7 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
     setFolders((current) =>
       current.map((folder) =>
         folder.id === folderEditorTargetId
-          ? { ...folder, name: nextName }
+          ? { ...folder, name: nextName, updatedAt: new Date().toISOString() }
           : folder
       )
     );
@@ -454,10 +536,22 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
 
   const deleteFolder = useCallback(
     (folderId: string) => {
-      setFolders((current) => current.filter((folder) => folder.id !== folderId));
+      setFolders((current) =>
+        current
+          .filter((folder) => folder.id !== folderId)
+          .map((folder, index) => ({
+            ...folder,
+            sortOrder: index,
+          }))
+      );
       setItems((current) =>
         current.map((item) =>
           item.folderId === folderId ? { ...item, folderId: null } : item
+        )
+      );
+      setRuns((current) =>
+        current.map((run) =>
+          run.folderId === folderId ? { ...run, folderId: null } : run
         )
       );
       setSelectedFolderId((current) => (current === folderId ? null : current));
@@ -472,14 +566,19 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
 
       const nextModel = getStudioModelById(run.modelId);
       setSelectedModelId(nextModel.id);
-      setDraftsByModelId((current) => ({
-        ...current,
-        [nextModel.id]: {
-          ...(current[nextModel.id] ?? createDraft(nextModel)),
-          ...run.draftSnapshot,
-          references: [],
-        },
-      }));
+      setDraftsByModelId((current) => {
+        const currentDraft = current[nextModel.id] ?? createDraft(nextModel);
+        releaseRemovedDraftReferencePreviews(currentDraft.references, []);
+
+        return {
+          ...current,
+          [nextModel.id]: {
+            ...currentDraft,
+            ...run.draftSnapshot,
+            references: [],
+          },
+        };
+      });
     },
     [runs]
   );
@@ -489,7 +588,7 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
       const item = items.find((entry) => entry.id === itemId);
       if (!item?.modelId) return;
 
-      const matchingRun = runs.find((run) => run.outputItemId === item.id);
+      const matchingRun = runs.find((run) => run.outputAssetId === item.id);
       if (matchingRun) {
         reuseRun(matchingRun.id);
         return;
@@ -497,14 +596,19 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
 
       const nextModel = getStudioModelById(item.modelId);
       setSelectedModelId(nextModel.id);
-      setDraftsByModelId((current) => ({
-        ...current,
-        [nextModel.id]: {
-          ...(current[nextModel.id] ?? createDraft(nextModel)),
-          prompt: item.prompt,
-          references: [],
-        },
-      }));
+      setDraftsByModelId((current) => {
+        const currentDraft = current[nextModel.id] ?? createDraft(nextModel);
+        releaseRemovedDraftReferencePreviews(currentDraft.references, []);
+
+        return {
+          ...current,
+          [nextModel.id]: {
+            ...currentDraft,
+            prompt: item.prompt,
+            references: [],
+          },
+        };
+      });
     },
     [items, reuseRun, runs]
   );
@@ -524,8 +628,8 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
     });
     setRuns((current) =>
       current.map((run) =>
-        run.outputItemId && itemIdSet.has(run.outputItemId)
-          ? { ...run, outputItemId: null }
+        run.outputAssetId && itemIdSet.has(run.outputAssetId)
+          ? { ...run, outputAssetId: null }
           : run
       )
     );
@@ -561,6 +665,7 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
             title: nextTitle || "Text note",
             contentText: nextContentText,
             prompt: nextContentText,
+            updatedAt: new Date().toISOString(),
           };
         })
       );
@@ -640,45 +745,108 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
 
     const createdAt = new Date().toISOString();
     const runId = createStudioId("run");
+    const shouldFailGeneration = /\b(fail|error)\b/i.test(currentDraft.prompt);
     const run: GenerationRun = {
       id: runId,
+      workspaceId: LOCAL_STUDIO_WORKSPACE_ID,
+      folderId: selectedFolderId,
       modelId: selectedModel.id,
       modelName: selectedModel.name,
       kind: selectedModel.kind,
-      status: "running",
+      provider: "fal",
+      requestMode:
+        selectedModel.kind === "image"
+          ? "text-to-image"
+          : selectedModel.kind === "video"
+            ? "text-to-video"
+            : "chat",
+      status: "queued",
       prompt: currentDraft.prompt,
       createdAt,
+      startedAt: null,
+      completedAt: null,
       summary: createGenerationRunSummary(selectedModel, currentDraft),
-      outputItemId: null,
+      outputAssetId: null,
+      previewUrl: createGenerationRunPreviewUrl(selectedModel, currentDraft),
+      progressPercent: 6,
+      errorMessage: null,
       draftSnapshot: createDraftSnapshot(currentDraft),
     };
 
     setRuns((current) => [run, ...current]);
 
-    const timeoutId = window.setTimeout(() => {
+    const processingTimerId = window.setTimeout(() => {
+      pendingTimersRef.current = removePendingTimerId(
+        pendingTimersRef.current,
+        processingTimerId
+      );
+
+      setRuns((current) =>
+        current.map((entry) =>
+          entry.id === runId
+            ? {
+                ...entry,
+                status: "processing",
+                startedAt: new Date().toISOString(),
+                progressPercent: 54,
+              }
+            : entry
+        )
+      );
+    }, 350);
+
+    const completionTimerId = window.setTimeout(() => {
+      pendingTimersRef.current = removePendingTimerId(
+        pendingTimersRef.current,
+        completionTimerId
+      );
+
+      if (shouldFailGeneration) {
+        setRuns((current) =>
+          current.map((entry) =>
+            entry.id === runId
+              ? {
+                  ...entry,
+                  status: "failed",
+                  completedAt: new Date().toISOString(),
+                  progressPercent: null,
+                  errorMessage: "Mock Fal generation failed before an output asset was returned.",
+                }
+              : entry
+          )
+        );
+        return;
+      }
+
       const nextItem = createGeneratedLibraryItem({
         model: selectedModel,
         draft: currentDraft,
         createdAt,
         folderId: selectedFolderId,
+        runId,
       });
-
-      pendingTimersRef.current = removePendingTimerId(
-        pendingTimersRef.current,
-        timeoutId
-      );
 
       setItems((current) => [nextItem, ...current]);
       setRuns((current) =>
         current.map((entry) =>
           entry.id === runId
-            ? { ...entry, status: "completed", outputItemId: nextItem.id }
+            ? {
+                ...entry,
+                status: "completed",
+                completedAt: new Date().toISOString(),
+                outputAssetId: nextItem.id,
+                progressPercent: 100,
+              }
             : entry
         )
       );
-    }, 900);
+    }, 1200);
 
-    pendingTimersRef.current = [...pendingTimersRef.current, timeoutId];
+    pendingTimersRef.current = [
+      ...pendingTimersRef.current,
+      processingTimerId,
+      completionTimerId,
+    ];
   }, [currentDraft, hasFalKey, isHostedMode, selectedFolderId, selectedModel]);
 
   return {
@@ -709,7 +877,6 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
     openCreateFolder,
     openCreateTextComposer,
     openRenameFolder,
-    pendingRuns,
     dropLibraryItemsIntoPromptBar,
     removeReference,
     reuseItem,
@@ -721,6 +888,7 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
     selectedFolder,
     selectedFolderId,
     selectedFolderItems,
+    selectedFolderRunCards,
     selectedItemCount,
     selectedItemIdSet,
     selectedModel,
@@ -738,6 +906,7 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
     toggleItemSelection,
     toggleSelectionMode,
     ungroupedItems,
+    ungroupedRunCards,
     updateTextItem,
     updateDraft,
     uploadFiles,

@@ -1,6 +1,7 @@
 "use client";
 
 import { Play } from "lucide-react";
+import { getPreviewMediaKind } from "../studio-preview-utils";
 import type { LibraryItem } from "../types";
 
 interface StudioDragPreviewOverlayProps {
@@ -9,7 +10,7 @@ interface StudioDragPreviewOverlayProps {
     itemIds: string[];
     leadItem: Pick<
       LibraryItem,
-      "id" | "kind" | "title" | "previewUrl" | "contentText" | "prompt"
+      "id" | "kind" | "title" | "previewUrl" | "mimeType" | "contentText" | "prompt"
     >;
     x: number;
     y: number;
@@ -22,6 +23,12 @@ export function StudioDragPreviewOverlay({
   if (!preview) {
     return null;
   }
+
+  const previewMediaKind = getPreviewMediaKind({
+    kind: preview.leadItem.kind,
+    mimeType: preview.leadItem.mimeType,
+    previewUrl: preview.leadItem.previewUrl,
+  });
 
   return (
     <div
@@ -41,13 +48,21 @@ export function StudioDragPreviewOverlay({
         <div className="relative size-[58px] overflow-hidden rounded-2xl border border-white/12 bg-neutral-950 shadow-[0_24px_48px_rgba(0,0,0,0.42)] ring-1 ring-white/5">
           {preview.leadItem.kind === "image" || preview.leadItem.kind === "video" ? (
             <>
-              {preview.leadItem.previewUrl ? (
+              {preview.leadItem.previewUrl && previewMediaKind === "image" ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={preview.leadItem.previewUrl}
                   alt={preview.leadItem.title}
                   className="size-full object-cover"
                   draggable={false}
+                />
+              ) : preview.leadItem.previewUrl && previewMediaKind === "video" ? (
+                <video
+                  src={preview.leadItem.previewUrl}
+                  muted
+                  playsInline
+                  preload="metadata"
+                  className="size-full object-cover"
                 />
               ) : (
                 <div className="size-full bg-[linear-gradient(180deg,rgba(255,255,255,0.10),rgba(255,255,255,0.04))]" />

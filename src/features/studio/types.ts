@@ -1,8 +1,20 @@
 export type StudioModelKind = "image" | "video" | "text";
 export type StudioModelSection = "images" | "videos" | "text";
-export type StudioRunStatus = "queued" | "running" | "completed";
+export type StudioRunStatus =
+  | "pending"
+  | "queued"
+  | "processing"
+  | "completed"
+  | "failed"
+  | "cancelled";
 export type LibraryItemSource = "generated" | "uploaded";
 export type LibraryItemKind = StudioModelKind;
+export type StudioWorkspaceProvider = "fal";
+export type StudioAssetStatus = "ready" | "processing" | "failed";
+export type StudioGenerationRequestMode =
+  | "text-to-image"
+  | "text-to-video"
+  | "chat";
 export type StudioReferenceInputKind =
   | "image"
   | "video"
@@ -13,6 +25,7 @@ export type LibraryItemRole =
   | "uploaded_source"
   | "text_note";
 export type DraftReferenceSource = "upload" | "library-item";
+export type DraftReferencePreviewSource = "owned" | "asset" | "none";
 
 export interface StudioModelDefinition {
   id: string;
@@ -43,6 +56,11 @@ export interface DraftReference {
   file: File;
   source: DraftReferenceSource;
   originAssetId: string | null;
+  title: string;
+  kind: StudioReferenceInputKind;
+  mimeType: string | null;
+  previewUrl: string | null;
+  previewSource: DraftReferencePreviewSource;
 }
 
 export interface StudioDraft {
@@ -62,38 +80,58 @@ export interface StudioDraft {
 
 export interface StudioFolder {
   id: string;
+  workspaceId: string;
   name: string;
   createdAt: string;
+  updatedAt: string;
+  sortOrder: number;
 }
 
 export interface LibraryItem {
   id: string;
+  workspaceId: string;
   title: string;
   kind: LibraryItemKind;
   source: LibraryItemSource;
   role: LibraryItemRole;
   previewUrl: string | null;
+  thumbnailUrl: string | null;
   contentText: string | null;
   createdAt: string;
+  updatedAt: string;
   modelId: string | null;
+  runId: string | null;
+  provider: StudioWorkspaceProvider;
+  status: StudioAssetStatus;
   prompt: string;
   meta: string;
   aspectRatio: number;
   folderId: string | null;
+  storagePath: string | null;
   mimeType: string | null;
   byteSize: number | null;
+  errorMessage: string | null;
 }
 
 export interface GenerationRun {
   id: string;
+  workspaceId: string;
+  folderId: string | null;
   modelId: string;
   modelName: string;
   kind: StudioModelKind;
+  provider: StudioWorkspaceProvider;
+  requestMode: StudioGenerationRequestMode;
   status: StudioRunStatus;
   prompt: string;
   createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
   summary: string;
-  outputItemId: string | null;
+  outputAssetId: string | null;
+  previewUrl: string | null;
+  progressPercent: number | null;
+  errorMessage: string | null;
   draftSnapshot: Omit<StudioDraft, "references"> & {
     referenceCount: number;
   };

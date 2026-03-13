@@ -1,6 +1,6 @@
 "use client";
 
-import { Copy, Loader2, Play, Trash2 } from "lucide-react";
+import { AlertTriangle, Copy, Loader2, Play, Slash, Trash2 } from "lucide-react";
 import type { RefObject } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
@@ -9,6 +9,9 @@ import {
   parseDraggedLibraryItemIds,
   setDraggedLibraryItems,
 } from "../studio-drag-data";
+import {
+  getLibraryItemPreviewMediaKind,
+} from "../studio-preview-utils";
 import type { GenerationRun, LibraryItem } from "../types";
 
 interface StudioGalleryProps {
@@ -18,7 +21,7 @@ interface StudioGalleryProps {
   emptyStateActionLabel?: string;
   emptyStateLabel: string;
   items: LibraryItem[];
-  pendingRuns?: GenerationRun[];
+  runCards?: GenerationRun[];
   selectedItemIdSet: Set<string>;
   selectionModeEnabled: boolean;
   sizeLevel: number;
@@ -50,7 +53,7 @@ type GalleryDisplayItem =
       aspectRatio: number;
     }
   | {
-      type: "pending";
+      type: "run";
       run: GenerationRun;
       key: string;
       aspectRatio: number;
@@ -151,20 +154,64 @@ function AssetTile({
   onReuseItem: (itemId: string) => void;
   onToggleItemSelection: (itemId: string) => void;
 }) {
-  if (displayItem.type === "pending") {
+  if (displayItem.type === "run") {
+    const statusTone =
+      displayItem.run.status === "failed"
+        ? "border-red-400/28 bg-red-500/16 text-red-50"
+        : displayItem.run.status === "cancelled"
+          ? "border-amber-400/28 bg-amber-500/14 text-amber-50"
+          : "border-white/28 bg-black/30 text-white/90";
+    const statusLabel =
+      displayItem.run.status === "processing"
+        ? "Generating"
+        : displayItem.run.status === "queued"
+          ? "Queued"
+          : displayItem.run.status === "pending"
+            ? "Pending"
+            : displayItem.run.status === "cancelled"
+              ? "Cancelled"
+              : "Failed";
+
     return (
       <div
         className="relative h-full w-full overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800"
         aria-label={displayItem.run.prompt}
       >
+        {displayItem.run.previewUrl ? (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={displayItem.run.previewUrl}
+              alt={displayItem.run.prompt}
+              className="absolute inset-0 size-full object-cover opacity-40"
+            />
+            <span className="pointer-events-none absolute inset-0 bg-black/42" />
+          </>
+        ) : null}
         <span className="pointer-events-none absolute -top-9 -left-9 h-28 w-28 rounded-full bg-cyan-300/25 blur-2xl" />
         <span className="pointer-events-none absolute -right-10 -bottom-10 h-32 w-32 rounded-full bg-sky-500/20 blur-3xl" />
         <span className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_top,rgba(0,0,0,0.72)_0%,rgba(0,0,0,0.32)_46%,rgba(0,0,0,0.16)_100%)]" />
 
         <div className="relative z-10 flex h-full flex-col p-2.5 text-white">
-          <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-white/28 bg-black/30 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-white/90 backdrop-blur-sm">
-            <Loader2 className="size-3 animate-spin" />
-            Generating
+          <span
+            className={cn(
+              "inline-flex w-fit items-center gap-1.5 rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] backdrop-blur-sm",
+              statusTone
+            )}
+          >
+            {displayItem.run.status === "failed" ? (
+              <AlertTriangle className="size-3" />
+            ) : displayItem.run.status === "cancelled" ? (
+              <Slash className="size-3" />
+            ) : (
+              <Loader2
+                className={cn(
+                  "size-3",
+                  displayItem.run.status === "processing" ? "animate-spin" : undefined
+                )}
+              />
+            )}
+            {statusLabel}
           </span>
           <div className="mt-auto">
             <p className="text-xs font-medium uppercase tracking-[0.14em] text-white/72">
@@ -173,6 +220,31 @@ function AssetTile({
             <p className="mt-1 line-clamp-3 text-sm leading-5 text-white">
               {displayItem.run.prompt}
             </p>
+            {displayItem.run.errorMessage ? (
+              <p className="mt-2 line-clamp-2 text-xs leading-4 text-red-100/88">
+                {displayItem.run.errorMessage}
+              </p>
+            ) : null}
+            {typeof displayItem.run.progressPercent === "number" ? (
+              <div className="mt-3">
+                <div className="h-1.5 overflow-hidden rounded-full bg-white/14">
+                  <div
+                    className={cn(
+                      "h-full rounded-full transition-[width] duration-300",
+                      displayItem.run.status === "failed"
+                        ? "bg-red-300/85"
+                        : "bg-primary"
+                    )}
+                    style={{
+                      width: `${Math.min(
+                        Math.max(displayItem.run.progressPercent, 0),
+                        100
+                      )}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -180,6 +252,7 @@ function AssetTile({
   }
 
   const { item } = displayItem;
+  const previewMediaKind = getLibraryItemPreviewMediaKind(item);
 
   return (
     <div
@@ -232,13 +305,22 @@ function AssetTile({
       )}
       aria-label={item.prompt || item.title}
     >
-      {item.kind === "image" && item.previewUrl ? (
+      {previewMediaKind === "image" && item.previewUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={item.previewUrl} alt={item.title} className="size-full object-cover" />
-      ) : item.kind === "video" && item.previewUrl ? (
+        <img
+          src={item.thumbnailUrl ?? item.previewUrl}
+          alt={item.title}
+          className="size-full object-cover"
+        />
+      ) : previewMediaKind === "video" && item.previewUrl ? (
         <div className="relative size-full">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={item.previewUrl} alt={item.title} className="size-full object-cover" />
+          <video
+            src={item.previewUrl}
+            muted
+            playsInline
+            preload="metadata"
+            className="size-full object-cover"
+          />
           <div className="absolute inset-0 flex items-center justify-center">
             <span className="rounded-full bg-black/45 p-1.5 backdrop-blur-sm">
               <Play className="size-4 text-white" />
@@ -340,7 +422,7 @@ export function StudioGallery({
   emptyStateActionLabel,
   emptyStateLabel,
   items,
-  pendingRuns = [],
+  runCards = [],
   selectedItemIdSet,
   selectionModeEnabled,
   sizeLevel,
@@ -365,17 +447,17 @@ export function StudioGallery({
         aspectRatio: item.aspectRatio,
       })
     );
-    const pendingItems = pendingRuns.map(
+    const runDisplayItems = runCards.map(
       (run): GalleryDisplayItem => ({
-        type: "pending",
+        type: "run",
         run,
         key: run.id,
         aspectRatio: run.kind === "video" ? 16 / 9 : run.kind === "text" ? 0.82 : 4 / 5,
       })
     );
 
-    return [...pendingItems, ...outputItems];
-  }, [items, pendingRuns]);
+    return [...runDisplayItems, ...outputItems];
+  }, [items, runCards]);
 
   const rows = useMemo(
     () => buildRows(galleryItems, Math.max(width - 24, 0), sizeLevel),

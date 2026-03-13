@@ -22,7 +22,9 @@ import {
 import { cn } from "@/lib/cn";
 import { readDraggedLibraryItems } from "../studio-drag-data";
 import { STUDIO_MEDIA_UPLOAD_ACCEPT } from "../studio-local-runtime-helpers";
+import { getDraftReferencePreviewMediaKind } from "../studio-preview-utils";
 import type {
+  DraftReference,
   StudioDraft,
   StudioModelDefinition,
   StudioModelSection,
@@ -381,10 +383,10 @@ function AddReferenceButton({
   );
 }
 
-function getReferencePreviewKind(file: File): ReferencePreviewKind {
-  if (file.type.startsWith("image/")) return "image";
-  if (file.type.startsWith("video/")) return "video";
-  return "file";
+function getReferencePreviewKind(
+  reference: Pick<DraftReference, "kind" | "mimeType" | "previewUrl">
+): ReferencePreviewKind {
+  return getDraftReferencePreviewMediaKind(reference);
 }
 
 function getFileExtension(fileName: string): string | null {
@@ -469,38 +471,28 @@ function isReferenceFileSupported(model: StudioModelDefinition, file: File) {
 }
 
 function ReferenceFileThumbnail({
-  file,
-  onPreview,
+  reference,
+  onPreviewReference,
   onRemove,
 }: {
-  file: File;
-  onPreview: (file: File) => void;
+  reference: DraftReference;
+  onPreviewReference: (reference: DraftReference) => void;
   onRemove: () => void;
 }) {
-  const previewKind = getReferencePreviewKind(file);
-  const previewUrl = useMemo(() => {
-    if (previewKind === "file") return null;
-    return URL.createObjectURL(file);
-  }, [file, previewKind]);
-
-  useEffect(() => {
-    return () => {
-      if (previewUrl) {
-        URL.revokeObjectURL(previewUrl);
-      }
-    };
-  }, [previewUrl]);
+  const previewKind = getReferencePreviewKind(reference);
+  const previewUrl =
+    previewKind === "file" ? null : reference.previewUrl;
 
   return (
     <div
       className="group relative size-14 shrink-0 overflow-hidden rounded-lg border border-white/[0.08] bg-muted/70 transition-transform duration-200 hover:scale-105"
-      title={file.name}
+      title={reference.title}
     >
       <button
         type="button"
-        onClick={() => onPreview(file)}
+        onClick={() => onPreviewReference(reference)}
         className="absolute inset-0 z-10 cursor-zoom-in rounded-lg outline-none transition focus-visible:ring-2 focus-visible:ring-primary/60"
-        aria-label={`Preview ${file.name}`}
+        aria-label={`Preview ${reference.title}`}
       />
 
       {previewKind === "video" && previewUrl ? (
@@ -520,7 +512,11 @@ function ReferenceFileThumbnail({
         </div>
       ) : previewUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={previewUrl} alt={file.name} className="size-full object-cover" />
+        <img
+          src={previewUrl}
+          alt={reference.title}
+          className="size-full object-cover"
+        />
       ) : (
         <div className="flex size-full items-center justify-center bg-muted/80">
           <FileText className="size-4 text-muted-foreground/60" />
@@ -534,7 +530,7 @@ function ReferenceFileThumbnail({
           onRemove();
         }}
         className="absolute right-0 top-0 z-20 flex size-5 items-center justify-center rounded-full bg-black/70 text-white opacity-0 transition-opacity hover:bg-black/85 group-hover:opacity-100 group-focus-within:opacity-100"
-        aria-label={`Remove ${file.name}`}
+        aria-label={`Remove ${reference.title}`}
       >
         <X className="size-3 text-white" />
       </button>
@@ -543,27 +539,20 @@ function ReferenceFileThumbnail({
 }
 
 function ReferencePreviewDialog({
-  file,
+  reference,
   onClose,
 }: {
-  file: File | null;
+  reference: DraftReference | null;
   onClose: () => void;
 }) {
   const previewKind = useMemo(
-    () => (file ? getReferencePreviewKind(file) : null),
-    [file]
+    () => (reference ? getReferencePreviewKind(reference) : null),
+    [reference]
   );
-  const previewUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
+  const previewUrl =
+    reference && previewKind !== "file" ? reference.previewUrl : null;
 
-  useEffect(() => {
-    return () => {
-      if (previewUrl) {
-        URL.revokeObjectURL(previewUrl);
-      }
-    };
-  }, [previewUrl]);
-
-  if (!file || !previewUrl) {
+  if (!reference) {
     return null;
   }
 
@@ -586,7 +575,7 @@ function ReferencePreviewDialog({
           <X className="size-4" />
         </button>
 
-        {previewKind === "video" ? (
+        {previewKind === "video" && previewUrl ? (
           <video
             src={previewUrl}
             controls
@@ -594,18 +583,18 @@ function ReferencePreviewDialog({
             playsInline
             className="max-h-[80vh] w-full bg-black object-contain"
           />
-        ) : previewKind === "image" ? (
+        ) : previewKind === "image" && previewUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={previewUrl}
-            alt={file.name}
+            alt={reference.title}
             className="max-h-[80vh] w-full object-contain"
           />
         ) : (
           <div className="flex min-h-[18rem] w-full flex-col items-center justify-center gap-4 px-8 py-10 text-center text-white">
             <FileText className="size-8 text-white/70" />
             <div className="space-y-1">
-              <div className="text-sm font-medium">{file.name}</div>
+              <div className="text-sm font-medium">{reference.title}</div>
               <div className="text-xs text-white/60">
                 Preview is not available for this file type.
               </div>
@@ -652,7 +641,9 @@ export function FloatingControlBar({
   onUpdateDraft,
 }: FloatingControlBarProps) {
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
-  const [previewFile, setPreviewFile] = useState<File | null>(null);
+  const [previewReference, setPreviewReference] = useState<DraftReference | null>(
+    null
+  );
   const [dragOver, setDragOver] = useState(false);
   const [dragHint, setDragHint] = useState<string | null>(null);
   const [dropError, setDropError] = useState<string | null>(null);
@@ -955,11 +946,11 @@ export function FloatingControlBar({
                       {draft.references.map((reference) => (
                         <ReferenceFileThumbnail
                           key={reference.id}
-                          file={reference.file}
-                          onPreview={setPreviewFile}
+                          reference={reference}
+                          onPreviewReference={setPreviewReference}
                           onRemove={() => {
-                            if (previewFile === reference.file) {
-                              setPreviewFile(null);
+                            if (previewReference?.id === reference.id) {
+                              setPreviewReference(null);
                             }
                             onRemoveReference(reference.id);
                           }}
@@ -1033,7 +1024,10 @@ export function FloatingControlBar({
         </div>
       </div>
 
-      <ReferencePreviewDialog file={previewFile} onClose={() => setPreviewFile(null)} />
+      <ReferencePreviewDialog
+        reference={previewReference}
+        onClose={() => setPreviewReference(null)}
+      />
     </>
   );
 }
