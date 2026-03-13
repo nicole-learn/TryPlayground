@@ -22,7 +22,11 @@ import {
 import { cn } from "@/lib/cn";
 import { readDraggedLibraryItems } from "../studio-drag-data";
 import { STUDIO_MEDIA_UPLOAD_ACCEPT } from "../studio-local-runtime-helpers";
-import type { StudioDraft, StudioModelDefinition, StudioModelSection } from "../types";
+import type {
+  StudioDraft,
+  StudioModelDefinition,
+  StudioModelSection,
+} from "../types";
 
 interface FloatingControlBarProps {
   draft: StudioDraft;
@@ -43,6 +47,27 @@ interface FloatingControlBarProps {
 }
 
 type ReferencePreviewKind = "image" | "video" | "file";
+
+const AUDIO_EXTENSIONS = new Set([
+  "mp3",
+  "wav",
+  "m4a",
+  "aac",
+  "ogg",
+  "flac",
+  "aiff",
+  "aif",
+  "opus",
+]);
+
+const DOCUMENT_EXTENSIONS = new Set([
+  "pdf",
+  "txt",
+  "md",
+  "markdown",
+  "csv",
+  "json",
+]);
 
 interface ControlPillOption {
   value: string;
@@ -318,10 +343,12 @@ function ModelSelectPill({
 }
 
 function AddReferenceButton({
+  acceptTypes,
   canAdd,
   onAdd,
   variant = "small",
 }: {
+  acceptTypes: string;
   canAdd: boolean;
   onAdd: (files: File[]) => void;
   variant?: "small" | "thumbnail";
@@ -340,7 +367,7 @@ function AddReferenceButton({
     >
       <input
         type="file"
-        accept={STUDIO_MEDIA_UPLOAD_ACCEPT}
+        accept={acceptTypes}
         multiple
         className="hidden"
         disabled={!canAdd}
@@ -358,6 +385,87 @@ function getReferencePreviewKind(file: File): ReferencePreviewKind {
   if (file.type.startsWith("image/")) return "image";
   if (file.type.startsWith("video/")) return "video";
   return "file";
+}
+
+function getFileExtension(fileName: string): string | null {
+  const trimmed = fileName.trim().toLowerCase();
+  if (!trimmed.includes(".")) return null;
+  return trimmed.split(".").pop()?.trim() ?? null;
+}
+
+function getSupportedReferenceAcceptTypes(model: StudioModelDefinition) {
+  const acceptedKinds = model.acceptedReferenceKinds ?? ["image", "video"];
+  const acceptParts: string[] = [];
+
+  if (acceptedKinds.includes("image")) {
+    acceptParts.push("image/*");
+  }
+  if (acceptedKinds.includes("video")) {
+    acceptParts.push("video/*");
+  }
+  if (acceptedKinds.includes("audio")) {
+    acceptParts.push("audio/*");
+  }
+  if (acceptedKinds.includes("document")) {
+    acceptParts.push(
+      ".pdf",
+      ".txt",
+      ".md",
+      ".markdown",
+      ".csv",
+      ".json",
+      "application/pdf",
+      "text/plain",
+      "text/markdown",
+      "text/csv",
+      "application/json"
+    );
+  }
+
+  return acceptParts.length > 0
+    ? Array.from(new Set(acceptParts)).join(",")
+    : STUDIO_MEDIA_UPLOAD_ACCEPT;
+}
+
+function isReferenceFileSupported(model: StudioModelDefinition, file: File) {
+  const mimeType = file.type.trim().toLowerCase();
+  const extension = getFileExtension(file.name);
+  const acceptedKinds = model.acceptedReferenceKinds ?? ["image", "video"];
+
+  if (mimeType.startsWith("image/")) {
+    return acceptedKinds.includes("image");
+  }
+  if (mimeType.startsWith("video/")) {
+    return acceptedKinds.includes("video");
+  }
+  if (mimeType.startsWith("audio/")) {
+    return acceptedKinds.includes("audio");
+  }
+
+  if (
+    acceptedKinds.includes("document") &&
+    (mimeType === "application/pdf" ||
+      mimeType === "text/plain" ||
+      mimeType === "text/markdown" ||
+      mimeType === "text/csv" ||
+      mimeType === "application/json")
+  ) {
+    return true;
+  }
+
+  if (!extension) {
+    return false;
+  }
+
+  if (acceptedKinds.includes("audio") && AUDIO_EXTENSIONS.has(extension)) {
+    return true;
+  }
+
+  if (acceptedKinds.includes("document") && DOCUMENT_EXTENSIONS.has(extension)) {
+    return true;
+  }
+
+  return false;
 }
 
 function ReferenceFileThumbnail({
@@ -552,9 +660,11 @@ export function FloatingControlBar({
   const dropErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const canGenerate = draft.prompt.trim().length > 0;
-  const canAddReferences = draft.references.length < 6;
+  const maxReferenceFiles = model.maxReferenceFiles ?? 6;
+  const canAddReferences = draft.references.length < maxReferenceFiles;
   const hasReferences = draft.references.length > 0;
   const acceptsDrop = true;
+  const referenceAcceptTypes = getSupportedReferenceAcceptTypes(model);
 
   useEffect(() => {
     const textarea = promptRef.current;
@@ -587,31 +697,37 @@ export function FloatingControlBar({
         return;
       }
 
-      const remaining = Math.max(0, 6 - draft.references.length);
+      const remaining = Math.max(0, maxReferenceFiles - draft.references.length);
       if (remaining <= 0) {
-        showDropError("Maximum 6 reference files reached");
+        showDropError(`Maximum ${maxReferenceFiles} reference files reached`);
         return;
       }
 
-      const compatibleFiles = files.filter(
-        (file) => file.type.startsWith("image/") || file.type.startsWith("video/")
+      const compatibleFiles = files.filter((file) =>
+        isReferenceFileSupported(model, file)
       );
 
       if (compatibleFiles.length === 0 && files.length > 0) {
-        showDropError("Only image and video files can be added as references");
+        showDropError("Those files are not supported as references for this model");
         return;
       }
 
       const filesToAdd = compatibleFiles.slice(0, remaining);
       if (filesToAdd.length < compatibleFiles.length) {
-        showDropError("Maximum 6 reference files reached");
+        showDropError(`Maximum ${maxReferenceFiles} reference files reached`);
       }
 
       if (filesToAdd.length > 0) {
         onAddReferences(filesToAdd);
       }
     },
-    [draft.references.length, model.supportsReferences, onAddReferences, showDropError]
+    [
+      draft.references.length,
+      maxReferenceFiles,
+      model,
+      onAddReferences,
+      showDropError,
+    ]
   );
 
   const handleDragEnter = useCallback(
@@ -752,16 +868,16 @@ export function FloatingControlBar({
       });
     }
 
-    if (model.kind === "image" && model.imageCountOptions) {
+    if (model.outputFormatOptions) {
       pills.push({
-        id: "outputs",
-        label: "Outputs",
-        value: `${draft.imageCount}`,
-        options: model.imageCountOptions.map((option) => ({
-          value: `${option}`,
-          label: `${option}`,
+        id: "output-format",
+        label: "Format",
+        value: draft.outputFormat,
+        options: model.outputFormatOptions.map((option) => ({
+          value: option,
+          label: option.toUpperCase(),
         })),
-        onValueChange: (value) => onUpdateDraft({ imageCount: Number(value) }),
+        onValueChange: (value) => onUpdateDraft({ outputFormat: value }),
       });
     }
 
@@ -793,41 +909,13 @@ export function FloatingControlBar({
       });
     }
 
-    if (model.kind === "text" && model.toneOptions) {
-      pills.push({
-        id: "tone",
-        label: "Tone",
-        value: draft.tone,
-        options: model.toneOptions.map((option) => ({
-          value: option,
-          label: option,
-        })),
-        onValueChange: (value) => onUpdateDraft({ tone: value }),
-      });
-    }
-
-    if (model.kind === "text" && model.maxTokenOptions) {
-      pills.push({
-        id: "max-tokens",
-        label: "Tokens",
-        value: `${draft.maxTokens}`,
-        options: model.maxTokenOptions.map((option) => ({
-          value: `${option}`,
-          label: `${option}`,
-        })),
-        onValueChange: (value) => onUpdateDraft({ maxTokens: Number(value) }),
-      });
-    }
-
     return pills;
   }, [
     draft.aspectRatio,
     draft.durationSeconds,
-    draft.imageCount,
     draft.includeAudio,
-    draft.maxTokens,
+    draft.outputFormat,
     draft.resolution,
-    draft.tone,
     model,
     onUpdateDraft,
   ]);
@@ -878,6 +966,7 @@ export function FloatingControlBar({
                         />
                       ))}
                       <AddReferenceButton
+                        acceptTypes={referenceAcceptTypes}
                         canAdd={canAddReferences}
                         onAdd={onAddReferences}
                         variant="thumbnail"
@@ -889,6 +978,7 @@ export function FloatingControlBar({
                     {model.supportsReferences && !hasReferences ? (
                       <div className="flex shrink-0 items-center pl-4 pt-3.5">
                         <AddReferenceButton
+                          acceptTypes={referenceAcceptTypes}
                           canAdd={canAddReferences}
                           onAdd={onAddReferences}
                         />

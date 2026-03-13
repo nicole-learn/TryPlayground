@@ -3,6 +3,11 @@ export type StudioModelSection = "images" | "videos" | "text";
 export type StudioRunStatus = "queued" | "running" | "completed";
 export type LibraryItemSource = "generated" | "uploaded";
 export type LibraryItemKind = StudioModelKind;
+export type StudioReferenceInputKind =
+  | "image"
+  | "video"
+  | "audio"
+  | "document";
 export type LibraryItemRole =
   | "generated_output"
   | "uploaded_source"
@@ -21,8 +26,11 @@ export interface StudioModelDefinition {
   promptPlaceholder: string;
   supportsNegativePrompt: boolean;
   supportsReferences: boolean;
+  maxReferenceFiles?: number;
+  acceptedReferenceKinds?: StudioReferenceInputKind[];
   aspectRatioOptions?: string[];
   resolutionOptions?: string[];
+  outputFormatOptions?: string[];
   imageCountOptions?: number[];
   durationOptions?: number[];
   toneOptions?: string[];
@@ -42,6 +50,7 @@ export interface StudioDraft {
   negativePrompt: string;
   aspectRatio: string;
   resolution: string;
+  outputFormat: string;
   imageCount: number;
   durationSeconds: number;
   includeAudio: boolean;

@@ -34,6 +34,7 @@ export function createDraftSnapshot(
     negativePrompt: draft.negativePrompt,
     aspectRatio: draft.aspectRatio,
     resolution: draft.resolution,
+    outputFormat: draft.outputFormat,
     imageCount: draft.imageCount,
     durationSeconds: draft.durationSeconds,
     includeAudio: draft.includeAudio,
@@ -245,7 +246,7 @@ export function createStudioSeedState() {
   const folders = createSeedFolders();
   const imageModel = getStudioModelById("nano-banana-2");
   const videoModel = getStudioModelById("veo-3.1");
-  const textModel = getStudioModelById("llm-router-gpt4-mini");
+  const textModel = getStudioModelById("gemini-flash");
   const now = Date.now();
 
   const imageDraft = {

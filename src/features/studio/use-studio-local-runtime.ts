@@ -44,8 +44,6 @@ import type {
   StudioProviderSettings,
 } from "./types";
 
-const MAX_REFERENCE_FILES = 6;
-
 interface UseStudioLocalRuntimeOptions {
   appMode?: StudioAppMode;
 }
@@ -159,6 +157,7 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
 
   const selectedItemCount = selectedItemIds.length;
   const hasFalKey = providerSettings.falApiKey.trim().length > 0;
+  const maxReferenceFiles = selectedModel.maxReferenceFiles ?? 6;
 
   const getItemsById = useCallback(
     (itemIds: string[]) => {
@@ -189,7 +188,7 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
       const mergedReferences = mergeDraftReferences(
         currentDraft.references,
         nextReferences,
-        MAX_REFERENCE_FILES
+        maxReferenceFiles
       );
 
       updateDraft({
@@ -201,10 +200,10 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
           0,
           mergedReferences.length - currentDraft.references.length
         ),
-        maxReached: mergedReferences.length >= MAX_REFERENCE_FILES,
+        maxReached: mergedReferences.length >= maxReferenceFiles,
       };
     },
-    [currentDraft.references, updateDraft]
+    [currentDraft.references, maxReferenceFiles, updateDraft]
   );
 
   const addReferences = useCallback(
@@ -318,11 +317,11 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
             const { addedCount, maxReached } = addDraftReferences(validReferences);
             if (addedCount === 0) {
               messages.push(
-                "Those references are already attached or the six-reference limit is full."
+                `Those references are already attached or the ${maxReferenceFiles}-reference limit is full.`
               );
             } else if (addedCount < validReferences.length || maxReached) {
               messages.push(
-                "Some references were skipped because they were duplicates or the limit is six."
+                `Some references were skipped because they were duplicates or the limit is ${maxReferenceFiles}.`
               );
             }
           }
@@ -339,6 +338,7 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
       addDraftReferences,
       currentDraft.prompt,
       getItemsById,
+      maxReferenceFiles,
       selectedModel.supportsReferences,
       updateDraft,
     ]
