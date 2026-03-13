@@ -20,10 +20,12 @@ import {
   type ReactNode,
 } from "react";
 import { cn } from "@/lib/cn";
+import { readDraggedLibraryItems } from "../studio-drag-data";
 import type { StudioDraft, StudioModelDefinition, StudioModelSection } from "../types";
 
 interface FloatingControlBarProps {
   draft: StudioDraft;
+  getDropHint: (itemIds: string[]) => string;
   model: StudioModelDefinition;
   models: StudioModelDefinition[];
   sections: ReadonlyArray<{
@@ -32,6 +34,7 @@ interface FloatingControlBarProps {
   }>;
   selectedModelId: string;
   onAddReferences: (files: File[]) => void;
+  onDropLibraryItems: (itemIds: string[]) => Promise<string | null> | string | null;
   onGenerate: () => void;
   onRemoveReference: (referenceId: string) => void;
   onSelectModel: (modelId: string) => void;
@@ -515,13 +518,25 @@ function DropErrorToast({ message }: { message: string }) {
   );
 }
 
+function DragHintToast({ message }: { message: string }) {
+  return (
+    <div className="animate-in fade-in slide-in-from-bottom-2 absolute inset-x-0 -top-10 flex justify-center">
+      <div className="rounded-lg border border-primary/30 bg-primary/12 px-3 py-1.5 text-xs font-medium text-primary shadow-lg backdrop-blur-sm">
+        {message}
+      </div>
+    </div>
+  );
+}
+
 export function FloatingControlBar({
   draft,
+  getDropHint,
   model,
   models,
   sections,
   selectedModelId,
   onAddReferences,
+  onDropLibraryItems,
   onGenerate,
   onRemoveReference,
   onSelectModel,
@@ -530,6 +545,7 @@ export function FloatingControlBar({
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const [previewFile, setPreviewFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [dragHint, setDragHint] = useState<string | null>(null);
   const [dropError, setDropError] = useState<string | null>(null);
   const dragDepthRef = useRef(0);
   const dropErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -601,21 +617,49 @@ export function FloatingControlBar({
     (event: DragEvent<HTMLDivElement>) => {
       if (!acceptsDrop) return;
       event.preventDefault();
+
+      const internalItemPayload = readDraggedLibraryItems(event.dataTransfer);
+      if (internalItemPayload) {
+        setDragHint(getDropHint(internalItemPayload.itemIds));
+      } else if (event.dataTransfer.files.length > 0) {
+        setDragHint(
+          model.supportsReferences
+            ? "Drop files to add as references"
+            : "This model doesn't support references yet"
+        );
+      } else {
+        setDragHint("Drop to use as prompt");
+      }
+
       dragDepthRef.current += 1;
       if (dragDepthRef.current === 1) {
         setDragOver(true);
       }
     },
-    [acceptsDrop]
+    [acceptsDrop, getDropHint, model.supportsReferences]
   );
 
   const handleDragOver = useCallback(
     (event: DragEvent<HTMLDivElement>) => {
       if (!acceptsDrop) return;
       event.preventDefault();
-      event.dataTransfer.dropEffect = model.supportsReferences ? "copy" : "move";
+      const internalItemPayload = readDraggedLibraryItems(event.dataTransfer);
+      if (internalItemPayload) {
+        event.dataTransfer.dropEffect = "copy";
+        setDragHint(getDropHint(internalItemPayload.itemIds));
+        return;
+      }
+
+      event.dataTransfer.dropEffect = "copy";
+      setDragHint(
+        event.dataTransfer.files.length > 0
+          ? model.supportsReferences
+            ? "Drop files to add as references"
+            : "This model doesn't support references yet"
+          : "Drop to use as prompt"
+      );
     },
-    [acceptsDrop, model.supportsReferences]
+    [acceptsDrop, getDropHint, model.supportsReferences]
   );
 
   const handleDragLeave = useCallback(
@@ -630,17 +674,28 @@ export function FloatingControlBar({
       dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
       if (dragDepthRef.current === 0) {
         setDragOver(false);
+        setDragHint(null);
       }
     },
     [acceptsDrop]
   );
 
   const handleDrop = useCallback(
-    (event: DragEvent<HTMLDivElement>) => {
+    async (event: DragEvent<HTMLDivElement>) => {
       if (!acceptsDrop) return;
       event.preventDefault();
       dragDepthRef.current = 0;
       setDragOver(false);
+      setDragHint(null);
+
+      const internalItemPayload = readDraggedLibraryItems(event.dataTransfer);
+      if (internalItemPayload) {
+        const dropMessage = await onDropLibraryItems(internalItemPayload.itemIds);
+        if (dropMessage) {
+          showDropError(dropMessage);
+        }
+        return;
+      }
 
       const droppedFiles = Array.from(event.dataTransfer.files ?? []);
       if (droppedFiles.length > 0) {
@@ -648,12 +703,23 @@ export function FloatingControlBar({
         return;
       }
 
-      const plainText = event.dataTransfer.getData("text/plain");
+      const plainText = event.dataTransfer.getData("text/plain").trim();
       if (plainText) {
-        onUpdateDraft({ prompt: plainText });
+        onUpdateDraft({
+          prompt: draft.prompt.trim()
+            ? `${draft.prompt.trim()}\n\n${plainText}`
+            : plainText,
+        });
       }
     },
-    [acceptsDrop, addDroppedReferenceFiles, onUpdateDraft]
+    [
+      acceptsDrop,
+      addDroppedReferenceFiles,
+      draft.prompt,
+      onDropLibraryItems,
+      onUpdateDraft,
+      showDropError,
+    ]
   );
 
   const settingPills = useMemo<ControlPillConfig[]>(() => {
@@ -784,9 +850,14 @@ export function FloatingControlBar({
               onDragEnter={handleDragEnter}
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
+              onDrop={(event) => {
+                void handleDrop(event);
+              }}
             >
               {dropError ? <DropErrorToast message={dropError} /> : null}
+              {!dropError && dragOver && dragHint ? (
+                <DragHintToast message={dragHint} />
+              ) : null}
 
               <div className="flex items-stretch">
                 <div className="flex min-w-0 flex-1 flex-col">

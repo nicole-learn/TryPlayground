@@ -8,11 +8,13 @@ import { FolderDialog } from "./folder-dialog";
 import { FolderSidebar } from "./folder-sidebar";
 import { HostedAccountDialog } from "./hosted-account-dialog";
 import { ProviderSettingsDialog } from "./provider-settings-dialog";
+import { StudioDragPreviewOverlay } from "./studio-drag-preview-overlay";
 import { StudioGallery } from "./studio-gallery";
 import { StudioMobileRail } from "./studio-mobile-rail";
 import { StudioTopBar } from "./studio-top-bar";
 import { StudioWorkspaceShell } from "./studio-workspace-shell";
 import { useStudioAppMode } from "../studio-app-mode";
+import { isStudioItemDrag } from "../studio-drag-data";
 import { useStudioRuntime } from "../use-studio-runtime";
 import type { LibraryItem } from "../types";
 
@@ -38,6 +40,7 @@ function getDownloadFileName(item: LibraryItem) {
 
 export function StudioPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const emptyDragImageRef = useRef<HTMLDivElement | null>(null);
   const { appMode, canSwitchModes, setAppMode } = useStudioAppMode();
   const studio = useStudioRuntime(appMode);
   const [isDesktopViewport, setIsDesktopViewport] = useState(() => {
@@ -46,6 +49,17 @@ export function StudioPage() {
   });
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [hostedAccountOpen, setHostedAccountOpen] = useState(false);
+  const [dragPreview, setDragPreview] = useState<{
+    count: number;
+    itemIds: string[];
+    leadItem: Pick<
+      LibraryItem,
+      "id" | "kind" | "title" | "previewUrl" | "contentText" | "prompt"
+    >;
+    x: number;
+    y: number;
+  } | null>(null);
+  const hasDragPreview = dragPreview !== null;
 
   useEffect(() => {
     const mediaQuery = window.matchMedia(XL_BREAKPOINT_QUERY);
@@ -58,9 +72,62 @@ export function StudioPage() {
     return () => mediaQuery.removeEventListener("change", syncViewport);
   }, []);
 
+  useEffect(() => {
+    if (!hasDragPreview) {
+      return;
+    }
+
+    const handleDrag = (event: DragEvent) => {
+      if (event.clientX === 0 && event.clientY === 0) {
+        return;
+      }
+
+      setDragPreview((current) =>
+        current
+          ? {
+              ...current,
+              x: event.clientX,
+              y: event.clientY,
+            }
+          : current
+      );
+    };
+
+    const clearDragPreview = () => {
+      setDragPreview(null);
+    };
+
+    document.addEventListener("drag", handleDrag);
+    document.addEventListener("drop", clearDragPreview);
+    document.addEventListener("dragend", clearDragPreview);
+
+    return () => {
+      document.removeEventListener("drag", handleDrag);
+      document.removeEventListener("drop", clearDragPreview);
+      document.removeEventListener("dragend", clearDragPreview);
+    };
+  }, [hasDragPreview]);
+
+  useEffect(() => {
+    const handleUnhandledInternalDrop = (event: DragEvent) => {
+      if (!event.dataTransfer || !isStudioItemDrag(event.dataTransfer)) {
+        return;
+      }
+
+      event.preventDefault();
+    };
+
+    window.addEventListener("drop", handleUnhandledInternalDrop);
+    return () => window.removeEventListener("drop", handleUnhandledInternalDrop);
+  }, []);
+
   const activeItem = useMemo(
     () => studio.items.find((item) => item.id === activeItemId) ?? null,
     [activeItemId, studio.items]
+  );
+  const draggingItemIdSet = useMemo(
+    () => new Set(dragPreview?.itemIds ?? []),
+    [dragPreview]
   );
 
   const handleAppModeChange = (nextMode: "local" | "hosted") => {
@@ -105,9 +172,33 @@ export function StudioPage() {
     link.remove();
   };
 
+  const handleItemDragStart = (params: {
+    itemIds: string[];
+    leadItem: LibraryItem;
+    x: number;
+    y: number;
+  }) => {
+    setDragPreview({
+      count: params.itemIds.length,
+      itemIds: params.itemIds,
+      leadItem: {
+        id: params.leadItem.id,
+        kind: params.leadItem.kind,
+        title: params.leadItem.title,
+        previewUrl: params.leadItem.previewUrl,
+        contentText: params.leadItem.contentText,
+        prompt: params.leadItem.prompt,
+      },
+      x: params.x,
+      y: params.y,
+    });
+  };
+
   const primaryGallery = (
     <StudioGallery
       allowDropMove={Boolean(studio.selectedFolderId)}
+      dragImageRef={emptyDragImageRef}
+      draggingItemIdSet={draggingItemIdSet}
       emptyStateActionLabel="Upload Assets"
       emptyStateLabel="Generate or Upload an asset to get started"
       items={studio.ungroupedItems}
@@ -122,6 +213,8 @@ export function StudioPage() {
         studio.deleteItem(itemId);
       }}
       onEmptyStateAction={() => fileInputRef.current?.click()}
+      onItemDragEnd={() => setDragPreview(null)}
+      onItemDragStart={handleItemDragStart}
       onMoveDraggedItems={(itemIds) => studio.moveItemsToFolder(itemIds, null)}
       onOpenItem={setActiveItemId}
       onReuseItem={studio.reuseItem}
@@ -132,6 +225,8 @@ export function StudioPage() {
   const secondaryGallery = studio.selectedFolder ? (
     <StudioGallery
       allowDropMove
+      dragImageRef={emptyDragImageRef}
+      draggingItemIdSet={draggingItemIdSet}
       emptyStateActionLabel="Upload Assets"
       emptyStateLabel="Drag or Upload an asset into this folder to see it here"
       items={studio.selectedFolderItems}
@@ -145,6 +240,8 @@ export function StudioPage() {
         studio.deleteItem(itemId);
       }}
       onEmptyStateAction={() => fileInputRef.current?.click()}
+      onItemDragEnd={() => setDragPreview(null)}
+      onItemDragStart={handleItemDragStart}
       onMoveDraggedItems={(itemIds) =>
         studio.moveItemsToFolder(itemIds, studio.selectedFolderId)
       }
@@ -166,16 +263,23 @@ export function StudioPage() {
           event.target.value = "";
         }}
       />
+      <div
+        ref={emptyDragImageRef}
+        aria-hidden
+        className="pointer-events-none fixed left-[-1000px] top-[-1000px] size-2 bg-transparent"
+      />
 
       <StudioWorkspaceShell
         floatingOverlay={
           <FloatingControlBar
             draft={studio.currentDraft}
+            getDropHint={studio.getPromptBarDropHint}
             model={studio.selectedModel}
             models={studio.models}
             sections={studio.modelSections}
             selectedModelId={studio.selectedModelId}
             onAddReferences={studio.addReferences}
+            onDropLibraryItems={studio.dropLibraryItemsIntoPromptBar}
             onGenerate={studio.generate}
             onRemoveReference={studio.removeReference}
             onSelectModel={studio.setSelectedModelId}
@@ -234,6 +338,8 @@ export function StudioPage() {
           />
         }
       />
+
+      <StudioDragPreviewOverlay preview={dragPreview} />
 
       {appMode === "local" ? (
         <ProviderSettingsDialog

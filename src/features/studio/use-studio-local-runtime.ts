@@ -17,11 +17,15 @@ import {
   createStudioSeedState,
 } from "./studio-local-runtime-data";
 import {
+  appendLibraryItemsToPrompt,
   createFolderItemCounts,
   createTextLibraryItem,
   createUploadedLibraryItem,
   hasFolderNameConflict,
+  isReferenceEligibleLibraryItem,
+  mergeDraftReferences,
   releaseUploadedPreview,
+  resolveLibraryItemToReferenceFile,
   removePendingTimerId,
   revokePreviewUrl,
 } from "./studio-local-runtime-helpers";
@@ -34,10 +38,13 @@ import type { StudioAppMode } from "./studio-app-mode";
 import type {
   DraftReference,
   GenerationRun,
+  LibraryItem,
   StudioDraft,
   StudioFolder,
   StudioProviderSettings,
 } from "./types";
+
+const MAX_REFERENCE_FILES = 6;
 
 interface UseStudioLocalRuntimeOptions {
   appMode?: StudioAppMode;
@@ -148,6 +155,17 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
   const selectedItemCount = selectedItemIds.length;
   const hasFalKey = providerSettings.falApiKey.trim().length > 0;
 
+  const getItemsById = useCallback(
+    (itemIds: string[]) => {
+      const uniqueIds = Array.from(new Set(itemIds));
+      const itemMap = new Map(items.map((item) => [item.id, item]));
+      return uniqueIds
+        .map((itemId) => itemMap.get(itemId))
+        .filter((item): item is LibraryItem => Boolean(item));
+    },
+    [items]
+  );
+
   const updateDraft = useCallback(
     (patch: Partial<StudioDraft>) => {
       setDraftsByModelId((current) => ({
@@ -161,6 +179,29 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
     [selectedModel]
   );
 
+  const addDraftReferences = useCallback(
+    (nextReferences: DraftReference[]) => {
+      const mergedReferences = mergeDraftReferences(
+        currentDraft.references,
+        nextReferences,
+        MAX_REFERENCE_FILES
+      );
+
+      updateDraft({
+        references: mergedReferences,
+      });
+
+      return {
+        addedCount: Math.max(
+          0,
+          mergedReferences.length - currentDraft.references.length
+        ),
+        maxReached: mergedReferences.length >= MAX_REFERENCE_FILES,
+      };
+    },
+    [currentDraft.references, updateDraft]
+  );
+
   const addReferences = useCallback(
     (files: File[]) => {
       if (files.length === 0) return;
@@ -168,13 +209,13 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
       const nextReferences: DraftReference[] = files.map((file) => ({
         id: createStudioId("ref"),
         file,
+        source: "upload",
+        originAssetId: null,
       }));
 
-      updateDraft({
-        references: [...currentDraft.references, ...nextReferences].slice(0, 6),
-      });
+      addDraftReferences(nextReferences);
     },
-    [currentDraft.references, updateDraft]
+    [addDraftReferences]
   );
 
   const removeReference = useCallback(
@@ -186,6 +227,116 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
       });
     },
     [currentDraft.references, updateDraft]
+  );
+
+  const getPromptBarDropHint = useCallback(
+    (itemIds: string[]) => {
+      const droppedItems = getItemsById(itemIds);
+      if (droppedItems.length === 0) {
+        return "Drop into prompt bar";
+      }
+
+      const hasTextItems = droppedItems.some((item) => item.kind === "text");
+      const hasReferenceItems = droppedItems.some(isReferenceEligibleLibraryItem);
+
+      if (hasTextItems && hasReferenceItems) {
+        return selectedModel.supportsReferences
+          ? "Drop to add references and prompt text"
+          : "Drop to merge text into the prompt";
+      }
+
+      if (hasTextItems) {
+        return droppedItems.length > 1
+          ? "Drop to merge into the prompt"
+          : "Drop to use as prompt";
+      }
+
+      if (hasReferenceItems) {
+        return selectedModel.supportsReferences
+          ? droppedItems.length > 1
+            ? "Drop to add as references"
+            : "Drop to add as reference"
+          : "This model doesn't support references yet";
+      }
+
+      return "Drop into prompt bar";
+    },
+    [getItemsById, selectedModel.supportsReferences]
+  );
+
+  const dropLibraryItemsIntoPromptBar = useCallback(
+    async (itemIds: string[]) => {
+      const droppedItems = getItemsById(itemIds);
+      if (droppedItems.length === 0) {
+        return "That asset is no longer available.";
+      }
+
+      const textItems = droppedItems.filter((item) => item.kind === "text");
+      const referenceItems = droppedItems.filter(isReferenceEligibleLibraryItem);
+      const messages: string[] = [];
+
+      if (textItems.length > 0) {
+        updateDraft({
+          prompt: appendLibraryItemsToPrompt(currentDraft.prompt, textItems),
+        });
+      }
+
+      if (referenceItems.length > 0) {
+        if (!selectedModel.supportsReferences) {
+          messages.push("This model doesn't support references yet.");
+        } else {
+          const resolvedReferenceEntries = await Promise.all(
+            referenceItems.map(async (item) => {
+              const file = await resolveLibraryItemToReferenceFile(item);
+              if (!file) return null;
+
+              return {
+                id: createStudioId("ref"),
+                file,
+                source: "library-item" as const,
+                originAssetId: item.id,
+              };
+            })
+          );
+
+          const validReferences = resolvedReferenceEntries.filter(
+            (
+              reference
+            ): reference is NonNullable<
+              (typeof resolvedReferenceEntries)[number]
+            > => Boolean(reference)
+          );
+
+          if (validReferences.length === 0) {
+            messages.push("Could not load the dropped asset as a reference.");
+          } else {
+            const { addedCount, maxReached } = addDraftReferences(validReferences);
+            if (addedCount === 0) {
+              messages.push(
+                "Those references are already attached or the six-reference limit is full."
+              );
+            } else if (addedCount < validReferences.length || maxReached) {
+              messages.push(
+                "Some references were skipped because they were duplicates or the limit is six."
+              );
+            }
+          }
+        }
+      }
+
+      if (textItems.length === 0 && referenceItems.length === 0) {
+        return "Only text, image, and video assets can be dropped here.";
+      }
+
+      return messages[0] ?? null;
+    },
+    [
+      addDraftReferences,
+      currentDraft.prompt,
+      getItemsById,
+      selectedModel.supportsReferences,
+      updateDraft,
+    ]
   );
 
   const clearSelection = useCallback(() => {
@@ -540,6 +691,7 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
     folders,
     gallerySizeLevel,
     generate,
+    getPromptBarDropHint,
     hasFalKey,
     items,
     modelSections: STUDIO_MODEL_SECTIONS,
@@ -549,6 +701,7 @@ export function useStudioLocalRuntime(options?: UseStudioLocalRuntimeOptions) {
     openCreateTextComposer,
     openRenameFolder,
     pendingRuns,
+    dropLibraryItemsIntoPromptBar,
     removeReference,
     reuseItem,
     reuseRun,

@@ -119,6 +119,7 @@ export function createGeneratedLibraryItem(params: {
       title,
       kind: "text",
       source: "generated",
+      role: "generated_output",
       previewUrl: null,
       contentText: body,
       createdAt: params.createdAt,
@@ -127,6 +128,8 @@ export function createGeneratedLibraryItem(params: {
       meta: `${params.model.name} • ${params.draft.maxTokens} max tokens • ${params.draft.tone}`,
       aspectRatio: 0.82,
       folderId: params.folderId,
+      mimeType: "text/plain",
+      byteSize: body.length,
     };
   }
 
@@ -135,6 +138,7 @@ export function createGeneratedLibraryItem(params: {
     title,
     kind: params.model.kind,
     source: "generated",
+    role: "generated_output",
     previewUrl: createPreviewSvg({
       title: params.model.name,
       subtitle:
@@ -152,6 +156,8 @@ export function createGeneratedLibraryItem(params: {
         : `${params.model.name} • ${params.draft.durationSeconds}s • ${params.draft.resolution}`,
     aspectRatio: parseAspectRatioValue(params.draft.aspectRatio),
     folderId: params.folderId,
+    mimeType: params.model.kind === "video" ? "video/mp4" : "image/png",
+    byteSize: null,
   };
 }
 
@@ -177,6 +183,56 @@ function createSeedFolders() {
     { id: createStudioId("folder"), name: "Prompts", createdAt: now },
     { id: createStudioId("folder"), name: "Concepts", createdAt: now },
   ] satisfies StudioFolder[];
+}
+
+function createMockUploadedSeedItem(params: {
+  title: string;
+  prompt: string;
+  kind: "image" | "video" | "text";
+  createdAt: string;
+  folderId: string | null;
+}): LibraryItem {
+  const previewUrl =
+    params.kind === "text"
+      ? null
+      : createPreviewSvg({
+          title: params.title,
+          subtitle: params.prompt,
+          kind: params.kind,
+          background:
+            params.kind === "video"
+              ? "#1d4ed8|#0f172a"
+              : "#38bdf8|#082f49",
+        });
+
+  return {
+    id: createStudioId("asset"),
+    title: params.title,
+    kind: params.kind,
+    source: "uploaded",
+    role: params.kind === "text" ? "text_note" : "uploaded_source",
+    previewUrl,
+    contentText: params.kind === "text" ? params.prompt : null,
+    createdAt: params.createdAt,
+    modelId: null,
+    prompt: params.prompt,
+    meta:
+      params.kind === "text"
+        ? "Text note"
+        : params.kind === "video"
+          ? "Uploaded video • Mock source"
+          : "Uploaded image • Mock source",
+    aspectRatio:
+      params.kind === "video" ? 16 / 9 : params.kind === "image" ? 4 / 5 : 0.82,
+    folderId: params.folderId,
+    mimeType:
+      params.kind === "text"
+        ? "text/plain"
+        : params.kind === "video"
+          ? "video/mp4"
+          : "image/png",
+    byteSize: params.prompt.length * 32,
+  };
 }
 
 export function buildStudioDraftMap() {
@@ -211,6 +267,9 @@ export function createStudioSeedState() {
     new Date(now - 1000 * 60 * 14).toISOString(),
     new Date(now - 1000 * 60 * 41).toISOString(),
     new Date(now - 1000 * 60 * 75).toISOString(),
+    new Date(now - 1000 * 60 * 92).toISOString(),
+    new Date(now - 1000 * 60 * 128).toISOString(),
+    new Date(now - 1000 * 60 * 172).toISOString(),
   ];
 
   const items = [
@@ -231,6 +290,28 @@ export function createStudioSeedState() {
       draft: textDraft,
       createdAt: createdAt[2],
       folderId: folders[2].id,
+    }),
+    createMockUploadedSeedItem({
+      title: "Desk composition reference",
+      prompt: "Warm editorial workspace with layered wood tones and late-afternoon window light",
+      kind: "image",
+      createdAt: createdAt[3],
+      folderId: folders[0].id,
+    }),
+    createMockUploadedSeedItem({
+      title: "Camera move study",
+      prompt: "Slow dolly across a tabletop scene with shallow depth and reflective highlights",
+      kind: "video",
+      createdAt: createdAt[4],
+      folderId: null,
+    }),
+    createMockUploadedSeedItem({
+      title: "Prompt draft",
+      prompt:
+        "Turn the desk scene into three visual directions: luxury editorial, quiet productivity, and cinematic twilight.",
+      kind: "text",
+      createdAt: createdAt[5],
+      folderId: folders[1].id,
     }),
   ];
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { FolderPlus, MoreHorizontal, Trash2 } from "lucide-react";
+import { useState } from "react";
 import { cn } from "@/lib/cn";
 import {
   isStudioItemDrag,
@@ -36,6 +37,8 @@ function FolderRow({
   onDrop,
   onRename,
 }: FolderRowProps) {
+  const [dragOver, setDragOver] = useState(false);
+
   return (
     <div className="group relative">
       <button
@@ -45,23 +48,36 @@ function FolderRow({
           if (!onDrop) return;
           if (!isStudioItemDrag(event.dataTransfer)) return;
           event.preventDefault();
+          setDragOver(true);
         }}
         onDragOver={(event) => {
           if (!onDrop) return;
           if (!isStudioItemDrag(event.dataTransfer)) return;
           event.preventDefault();
           event.dataTransfer.dropEffect = "move";
+          if (!dragOver) {
+            setDragOver(true);
+          }
+        }}
+        onDragLeave={(event) => {
+          const nextTarget = event.relatedTarget as Node | null;
+          if (nextTarget && event.currentTarget.contains(nextTarget)) return;
+          setDragOver(false);
         }}
         onDrop={(event) => {
           if (!onDrop) return;
           event.preventDefault();
+          setDragOver(false);
           onDrop(parseDraggedLibraryItemIds(event.dataTransfer));
         }}
         className={cn(
           "flex w-full items-center justify-between gap-3 rounded-xl px-4 py-3 text-left text-[15px] transition-all duration-150",
           active
             ? "bg-white/[0.11] font-medium text-foreground"
-            : "bg-white/[0.05] text-foreground/84 hover:bg-white/[0.08] hover:text-foreground"
+            : "bg-white/[0.05] text-foreground/84 hover:bg-white/[0.08] hover:text-foreground",
+          dragOver
+            ? "border border-primary/65 bg-primary/12 text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--primary)_30%,transparent)]"
+            : "border border-transparent"
         )}
       >
         <span className="truncate">{label}</span>

@@ -3,6 +3,11 @@ export type StudioModelSection = "images" | "videos" | "text";
 export type StudioRunStatus = "queued" | "running" | "completed";
 export type LibraryItemSource = "generated" | "uploaded";
 export type LibraryItemKind = StudioModelKind | "file";
+export type LibraryItemRole =
+  | "generated_output"
+  | "uploaded_source"
+  | "text_note";
+export type DraftReferenceSource = "upload" | "library-item";
 
 export interface StudioModelDefinition {
   id: string;
@@ -28,6 +33,8 @@ export interface StudioModelDefinition {
 export interface DraftReference {
   id: string;
   file: File;
+  source: DraftReferenceSource;
+  originAssetId: string | null;
 }
 
 export interface StudioDraft {
@@ -55,6 +62,7 @@ export interface LibraryItem {
   title: string;
   kind: LibraryItemKind;
   source: LibraryItemSource;
+  role: LibraryItemRole;
   previewUrl: string | null;
   contentText: string | null;
   createdAt: string;
@@ -63,6 +71,8 @@ export interface LibraryItem {
   meta: string;
   aspectRatio: number;
   folderId: string | null;
+  mimeType: string | null;
+  byteSize: number | null;
 }
 
 export interface GenerationRun {

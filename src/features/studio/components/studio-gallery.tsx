@@ -1,17 +1,20 @@
 "use client";
 
 import { Copy, Loader2, Play, Trash2 } from "lucide-react";
+import type { RefObject } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import {
   isStudioItemDrag,
   parseDraggedLibraryItemIds,
-  setDraggedLibraryItemIds,
+  setDraggedLibraryItems,
 } from "../studio-drag-data";
 import type { GenerationRun, LibraryItem } from "../types";
 
 interface StudioGalleryProps {
   allowDropMove?: boolean;
+  dragImageRef?: RefObject<HTMLDivElement | null>;
+  draggingItemIdSet?: Set<string>;
   emptyStateActionLabel?: string;
   emptyStateLabel: string;
   items: LibraryItem[];
@@ -21,6 +24,13 @@ interface StudioGalleryProps {
   sizeLevel: number;
   onDeleteItem: (itemId: string) => void;
   onEmptyStateAction?: () => void;
+  onItemDragEnd?: () => void;
+  onItemDragStart?: (params: {
+    itemIds: string[];
+    leadItem: LibraryItem;
+    x: number;
+    y: number;
+  }) => void;
   onMoveDraggedItems?: (itemIds: string[]) => void;
   onOpenItem: (itemId: string) => void;
   onReuseItem: (itemId: string) => void;
@@ -110,18 +120,33 @@ function useMeasuredWidth() {
 }
 
 function AssetTile({
+  dragImageRef,
+  dragItemIds,
   displayItem,
+  isBeingDragged,
   isSelected,
   selectionModeEnabled,
   onDeleteItem,
+  onDragEndItem,
+  onDragStartItem,
   onReuseItem,
   onOpenItem,
   onToggleItemSelection,
 }: {
+  dragImageRef?: RefObject<HTMLDivElement | null>;
+  dragItemIds: string[];
   displayItem: GalleryDisplayItem;
+  isBeingDragged: boolean;
   isSelected: boolean;
   selectionModeEnabled: boolean;
   onDeleteItem: (itemId: string) => void;
+  onDragEndItem?: () => void;
+  onDragStartItem?: (params: {
+    itemIds: string[];
+    leadItem: LibraryItem;
+    x: number;
+    y: number;
+  }) => void;
   onOpenItem: (itemId: string) => void;
   onReuseItem: (itemId: string) => void;
   onToggleItemSelection: (itemId: string) => void;
@@ -160,7 +185,7 @@ function AssetTile({
     <div
       role="button"
       tabIndex={0}
-      draggable={!selectionModeEnabled}
+      draggable
       onClick={() => {
         if (selectionModeEnabled) {
           onToggleItemSelection(item.id);
@@ -179,11 +204,27 @@ function AssetTile({
         onOpenItem(item.id);
       }}
       onDragStart={(event) => {
-        setDraggedLibraryItemIds(event.dataTransfer, [item.id]);
+        if (dragImageRef?.current) {
+          event.dataTransfer.setDragImage(dragImageRef.current, 0, 0);
+        }
+
+        setDraggedLibraryItems(event.dataTransfer, {
+          itemIds: dragItemIds,
+          leadItem: item,
+          sourceFolderId: item.folderId,
+        });
+        onDragStartItem?.({
+          itemIds: dragItemIds,
+          leadItem: item,
+          x: event.clientX,
+          y: event.clientY,
+        });
       }}
+      onDragEnd={() => onDragEndItem?.()}
       className={cn(
         "group relative h-full w-full overflow-hidden outline-none transition focus-visible:ring-2 focus-visible:ring-primary/70 focus-visible:ring-offset-1 focus-visible:ring-offset-background",
         selectionModeEnabled ? "cursor-crosshair" : "cursor-default",
+        isBeingDragged ? "scale-[0.985] opacity-30" : undefined,
         isSelected ? "ring-2 ring-primary/85 ring-inset" : undefined,
         item.kind === "text"
           ? "bg-[#f5f0e8] text-black dark:bg-[#f5f0e8] dark:text-black"
@@ -294,6 +335,8 @@ function AssetTile({
 
 export function StudioGallery({
   allowDropMove = false,
+  dragImageRef,
+  draggingItemIdSet,
   emptyStateActionLabel,
   emptyStateLabel,
   items,
@@ -303,6 +346,8 @@ export function StudioGallery({
   sizeLevel,
   onDeleteItem,
   onEmptyStateAction,
+  onItemDragEnd,
+  onItemDragStart,
   onMoveDraggedItems,
   onOpenItem,
   onReuseItem,
@@ -396,6 +441,14 @@ export function StudioGallery({
                   const widthPx = Math.max(1, row.height * displayItem.aspectRatio);
                   const itemId =
                     displayItem.type === "asset" ? displayItem.item.id : displayItem.run.id;
+                  const dragItemIds =
+                    displayItem.type === "asset" &&
+                    selectedItemIdSet.has(displayItem.item.id) &&
+                    selectedItemIdSet.size > 1
+                      ? Array.from(selectedItemIdSet)
+                      : displayItem.type === "asset"
+                        ? [displayItem.item.id]
+                        : [];
 
                   return (
                     <div
@@ -407,10 +460,19 @@ export function StudioGallery({
                       }}
                     >
                       <AssetTile
+                        dragImageRef={dragImageRef}
+                        dragItemIds={dragItemIds}
                         displayItem={displayItem}
+                        isBeingDragged={
+                          displayItem.type === "asset"
+                            ? draggingItemIdSet?.has(displayItem.item.id) ?? false
+                            : false
+                        }
                         isSelected={selectedItemIdSet.has(itemId)}
                         selectionModeEnabled={selectionModeEnabled}
                         onDeleteItem={onDeleteItem}
+                        onDragEndItem={onItemDragEnd}
+                        onDragStartItem={onItemDragStart}
                         onOpenItem={onOpenItem}
                         onReuseItem={onReuseItem}
                         onToggleItemSelection={onToggleItemSelection}
