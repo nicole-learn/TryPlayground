@@ -71,7 +71,6 @@ import type {
   GenerationRun,
   LibraryItem,
   PersistedStudioDraft,
-  StudioCreditPurchaseAmount,
   StudioDraft,
   StudioFolderEditorMode,
   StudioHostedAccount,
@@ -453,6 +452,66 @@ async function queueHostedGeneration(params: {
   return payload;
 }
 
+async function createHostedCheckoutSessionRequest(params: {
+  successPath?: string;
+  cancelPath?: string;
+  signal?: AbortSignal;
+}) {
+  const response = await fetchHostedWithSession(
+    "/api/studio/hosted/billing/checkout",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        successPath: params.successPath,
+        cancelPath: params.cancelPath,
+      }),
+      signal: params.signal,
+    }
+  );
+  const payload = (await response.json()) as {
+    checkoutUrl?: string;
+    error?: string;
+  };
+
+  if (!response.ok || !payload.checkoutUrl) {
+    throw new Error(payload.error ?? "Could not start the Stripe Checkout flow.");
+  }
+
+  return payload.checkoutUrl;
+}
+
+async function completeHostedCheckoutSessionRequest(params: {
+  checkoutSessionId: string;
+  signal?: AbortSignal;
+}) {
+  const response = await fetchHostedWithSession(
+    "/api/studio/hosted/billing/complete",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        checkoutSessionId: params.checkoutSessionId,
+      }),
+      signal: params.signal,
+    }
+  );
+  const payload = (await response.json()) as {
+    error?: string;
+    status?: string;
+  };
+
+  if (!response.ok) {
+    throw new Error(payload.error ?? "Could not finalize the Stripe checkout session.");
+  }
+
+  return payload;
+}
+
 async function deleteHostedAccountRequest(signal?: AbortSignal) {
   const response = await fetchHostedWithSession("/api/studio/hosted/account", {
     method: "DELETE",
@@ -513,6 +572,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   const hostedRevisionRef = useRef(0);
   const hostedSyncIntervalRef = useRef(1400);
   const hostedRequestControllersRef = useRef(new Set<AbortController>());
+  const completedCheckoutSessionIdsRef = useRef(new Set<string>());
   const zeroCreditsDialogOpenedRef = useRef(false);
 
   const [profile, setProfile] = useState(seedSnapshot.profile);
@@ -569,6 +629,9 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   const [uploadAssetsLoading, setUploadAssetsLoading] = useState(false);
   const [queueLimitDialogOpen, setQueueLimitDialogOpen] = useState(false);
   const [purchaseCreditsPending, setPurchaseCreditsPending] = useState(false);
+  const [purchaseCreditsErrorMessage, setPurchaseCreditsErrorMessage] = useState<string | null>(
+    null
+  );
   const [hostedSetupMessage, setHostedSetupMessage] = useState<string | null>(null);
   const [hostedAuthStatus, setHostedAuthStatus] = useState<HostedAuthStatus>(
     appMode === "hosted" ? "checking" : "signed_out"
@@ -937,6 +1000,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       setUploadDialogOpen(false);
       setUploadDialogFolderId(null);
       setQueueLimitDialogOpen(false);
+      setPurchaseCreditsErrorMessage(null);
       setHostedSetupMessage(null);
       setDraftReferencesByModelId(createEmptyDraftReferenceMap());
       setDraftFramesByModelId(createEmptyDraftFrameMap());
@@ -1555,6 +1619,63 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
 
     zeroCreditsDialogOpenedRef.current = false;
   }, [appMode, creditBalance, hostedUserSignedIn]);
+
+  useEffect(() => {
+    if (appMode !== "hosted" || !hostedUserSignedIn || typeof window === "undefined") {
+      return;
+    }
+
+    const url = new URL(window.location.href);
+    const checkoutSessionId = url.searchParams.get("session_id")?.trim() ?? "";
+    const checkoutState = url.searchParams.get("checkout")?.trim() ?? "";
+
+    if (!checkoutSessionId) {
+      if (checkoutState === "cancelled") {
+        url.searchParams.delete("checkout");
+        window.history.replaceState({}, "", url.toString());
+      }
+      return;
+    }
+
+    if (completedCheckoutSessionIdsRef.current.has(checkoutSessionId)) {
+      return;
+    }
+
+    completedCheckoutSessionIdsRef.current.add(checkoutSessionId);
+    const controller = new AbortController();
+    setPurchaseCreditsPending(true);
+    setPurchaseCreditsErrorMessage(null);
+
+    void completeHostedCheckoutSessionRequest({
+      checkoutSessionId,
+      signal: controller.signal,
+    })
+      .then((payload) => {
+        if (payload.status === "completed") {
+          setSettingsDialogOpen(true);
+        }
+
+        refreshHostedState();
+      })
+      .catch((error) => {
+        completedCheckoutSessionIdsRef.current.delete(checkoutSessionId);
+        setPurchaseCreditsErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "Could not finalize your Stripe checkout."
+        );
+      })
+      .finally(() => {
+        setPurchaseCreditsPending(false);
+        url.searchParams.delete("checkout");
+        url.searchParams.delete("session_id");
+        window.history.replaceState({}, "", url.toString());
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [appMode, hostedUserSignedIn, refreshHostedState]);
 
   const hostedSessionAvatarLabel =
     String(
@@ -2571,21 +2692,35 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     [appMode, applyHostedMutation, applyLocalMutation, refreshLocalState]
   );
 
-  const purchaseHostedCredits = useCallback(async (credits: StudioCreditPurchaseAmount) => {
+  const purchaseHostedCredits = useCallback(async () => {
     if (appMode !== "hosted") {
       return;
     }
 
     setPurchaseCreditsPending(true);
+    setPurchaseCreditsErrorMessage(null);
     try {
-      await applyHostedMutation({
-        action: "purchase_credits",
-        credits,
+      const successPath =
+        typeof window === "undefined"
+          ? "/"
+          : `${window.location.pathname}${window.location.search}`;
+      const checkoutUrl = await createHostedCheckoutSessionRequest({
+        successPath,
+        cancelPath: successPath,
       });
+      window.location.assign(checkoutUrl);
+      return;
+    } catch (error) {
+      setPurchaseCreditsErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not open Stripe Checkout."
+      );
+      throw error;
     } finally {
       setPurchaseCreditsPending(false);
     }
-  }, [appMode, applyHostedMutation]);
+  }, [appMode]);
 
   const buildHostedGenerationPayload = useCallback(() => {
     const inputs: HostedStudioGenerateInputDescriptor[] = [];
@@ -2797,6 +2932,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     openUploadDialog,
     providerConnectionStatus,
     providerSettings,
+    purchaseCreditsErrorMessage,
     purchaseCreditsPending,
     purchaseHostedCredits,
     queueLimitDialogOpen,

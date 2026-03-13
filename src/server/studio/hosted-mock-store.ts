@@ -417,22 +417,6 @@ export async function mutateHostedMockSnapshot(mutation: HostedStudioMutation) {
   let changedAt = new Date().toISOString();
 
   switch (mutation.action) {
-    case "purchase_credits": {
-      if (snapshot.creditBalance) {
-        snapshot.creditBalance.balanceCredits += mutation.credits;
-        snapshot.creditBalance.updatedAt = changedAt;
-      }
-      if (snapshot.activeCreditPack) {
-        snapshot.activeCreditPack = {
-          ...snapshot.activeCreditPack,
-          credits: mutation.credits,
-          priceCents: mutation.credits,
-          updatedAt: changedAt,
-        };
-      }
-      didChange = true;
-      break;
-    }
     case "set_enabled_models": {
       snapshot.modelConfiguration = {
         enabledModelIds: normalizeStudioEnabledModelIds(mutation.enabledModelIds),

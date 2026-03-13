@@ -415,6 +415,7 @@ export function StudioPage({
         hostedAccount={studio.hostedAccount}
         modelConfiguration={studio.modelConfiguration}
         open={studio.settingsDialogOpen}
+        purchaseErrorMessage={studio.purchaseCreditsErrorMessage}
         providerConnectionStatus={studio.providerConnectionStatus}
         providerSettings={studio.providerSettings}
         purchasePending={studio.purchaseCreditsPending}

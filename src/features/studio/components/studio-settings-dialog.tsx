@@ -4,8 +4,6 @@ import {
   Eye,
   EyeOff,
   Loader2,
-  Minus,
-  Plus,
   Search,
   X,
 } from "lucide-react";
@@ -31,6 +29,7 @@ interface StudioSettingsDialogProps {
   hostedAccount: StudioHostedAccount | null;
   modelConfiguration: StudioModelConfiguration;
   open: boolean;
+  purchaseErrorMessage: string | null;
   providerConnectionStatus: StudioProviderConnectionStatus;
   providerSettings: StudioProviderSettings;
   purchasePending: boolean;
@@ -270,16 +269,15 @@ function ModelConfigurationTab({
 
 function CreditsTab({
   account,
+  purchaseErrorMessage,
   purchasePending,
   onPurchaseCredits,
 }: {
   account: StudioHostedAccount;
+  purchaseErrorMessage: string | null;
   purchasePending: boolean;
   onPurchaseCredits: (credits: StudioCreditPurchaseAmount) => Promise<void> | void;
 }) {
-  const [purchaseAmount, setPurchaseAmount] =
-    useState<StudioCreditPurchaseAmount>(100);
-
   return (
     <div className="flex min-h-[420px] flex-col items-center justify-center gap-8">
       <div className="text-center">
@@ -292,33 +290,13 @@ function CreditsTab({
       </div>
 
       <div className="flex items-center gap-4">
-        <button
-          type="button"
-          onClick={() => setPurchaseAmount(10)}
-          disabled={purchaseAmount === 10}
-          className="inline-flex size-12 items-center justify-center rounded-full border border-white/10 bg-white/[0.03] text-white transition hover:border-white/20 hover:bg-white/[0.05] disabled:opacity-40"
-          aria-label="Choose 10 credits"
-        >
-          <Minus className="size-4" />
-        </button>
-
         <div className="min-w-[132px] rounded-full border border-white/10 bg-white/[0.03] px-6 py-3 text-center text-2xl font-semibold text-white">
-          {purchaseAmount}
+          100
         </div>
 
         <button
           type="button"
-          onClick={() => setPurchaseAmount(100)}
-          disabled={purchaseAmount === 100}
-          className="inline-flex size-12 items-center justify-center rounded-full border border-white/10 bg-white/[0.03] text-white transition hover:border-white/20 hover:bg-white/[0.05] disabled:opacity-40"
-          aria-label="Choose 100 credits"
-        >
-          <Plus className="size-4" />
-        </button>
-
-        <button
-          type="button"
-          onClick={() => void onPurchaseCredits(purchaseAmount)}
+          onClick={() => void onPurchaseCredits(100)}
           disabled={purchasePending}
           className="inline-flex h-12 items-center gap-2 rounded-full bg-primary px-6 text-sm font-medium text-primary-foreground transition hover:brightness-110 disabled:opacity-60"
         >
@@ -326,6 +304,12 @@ function CreditsTab({
           <span>Buy</span>
         </button>
       </div>
+
+      {purchaseErrorMessage ? (
+        <div className="rounded-2xl border border-red-500/18 bg-red-500/10 px-4 py-3 text-sm text-red-100/90">
+          {purchaseErrorMessage}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -394,6 +378,7 @@ export function StudioSettingsDialog({
   hostedAccount,
   modelConfiguration,
   open,
+  purchaseErrorMessage,
   providerConnectionStatus,
   providerSettings,
   purchasePending,
@@ -477,6 +462,7 @@ export function StudioSettingsDialog({
           hostedTab === "credits" && hostedAccount ? (
             <CreditsTab
               account={hostedAccount}
+              purchaseErrorMessage={purchaseErrorMessage}
               purchasePending={purchasePending}
               onPurchaseCredits={onPurchaseCredits}
             />

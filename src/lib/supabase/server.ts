@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import type { User } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import type { Database } from "./database.types";
-import { getSupabaseEnv } from "./env";
+import { getSupabaseEnv, getSupabaseServiceRoleEnv } from "./env";
 
 export function getRequestBearerToken(request: Request) {
   const authorizationHeader = request.headers.get("authorization")?.trim() ?? "";
@@ -28,6 +28,18 @@ export function createSupabaseUserServerClient(accessToken: string) {
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
+    },
+  });
+}
+
+export function createSupabaseServiceRoleClient() {
+  const { serviceRoleKey, url } = getSupabaseServiceRoleEnv();
+
+  return createClient<Database>(url, serviceRoleKey, {
+    auth: {
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+      persistSession: false,
     },
   });
 }

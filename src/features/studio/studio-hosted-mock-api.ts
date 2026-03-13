@@ -4,7 +4,6 @@ import type {
   LibraryItemKind,
   PersistedStudioDraft,
   StudioReferenceInputKind,
-  StudioCreditPurchaseAmount,
   StudioHostedClientStateDefaults,
   StudioHostedWorkspaceState,
 } from "./types";
@@ -54,10 +53,6 @@ export interface HostedStudioGenerateInputDescriptor {
 }
 
 export type HostedStudioMutation =
-  | {
-      action: "purchase_credits";
-      credits: StudioCreditPurchaseAmount;
-    }
   | {
       action: "set_enabled_models";
       enabledModelIds: string[];

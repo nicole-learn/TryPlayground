@@ -41,6 +41,7 @@ import type {
 } from "@/features/studio/types";
 import type { Database, Json } from "@/lib/supabase/database.types";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
+import { applyHostedCreditLedgerEntry } from "@/server/studio/hosted-billing";
 
 const HOSTED_SYNC_INTERVAL_MS = 1400;
 const HOSTED_MEDIA_BUCKET = "hosted-media";
@@ -121,17 +122,17 @@ function resolveStoredAssetUrl(storageBucket: string, storagePath: string | null
 }
 
 function createActiveCreditPack(credits: number | null, updatedAt: string): StudioCreditPack | null {
-  if (credits !== 10 && credits !== 100) {
+  if (credits !== 100) {
     return null;
   }
 
   return {
     id: `credit-pack-${credits}`,
     credits,
-    priceCents: credits,
+    priceCents: 1000,
     currency: "usd",
     isActive: true,
-    displayOrder: credits === 10 ? 0 : 1,
+    displayOrder: 0,
     createdAt: updatedAt,
     updatedAt,
   };
@@ -537,54 +538,6 @@ async function buildHostedState(params: {
   };
 }
 
-async function updateHostedAccountCredits(params: {
-  supabase: HostedSupabaseClient;
-  userId: string;
-  nextBalance: number;
-  activeCreditPack?: number | null;
-}) {
-  const payload: {
-    credit_balance: number;
-    active_credit_pack?: number | null;
-  } = {
-    credit_balance: params.nextBalance,
-  };
-
-  if (typeof params.activeCreditPack !== "undefined") {
-    payload.active_credit_pack = params.activeCreditPack;
-  }
-
-  const { error } = await params.supabase
-    .from("studio_accounts")
-    .update(payload)
-    .eq("user_id", params.userId);
-
-  if (error) {
-    throw new Error(error.message);
-  }
-}
-
-async function insertCreditLedgerEntry(params: {
-  supabase: HostedSupabaseClient;
-  userId: string;
-  deltaCredits: number;
-  reason: "purchase" | "generation_hold" | "generation_settlement" | "generation_refund" | "admin_adjustment";
-  relatedRunId?: string | null;
-  metadata?: Json;
-}) {
-  const { error } = await params.supabase.from("credit_ledger").insert({
-    user_id: params.userId,
-    delta_credits: params.deltaCredits,
-    reason: params.reason,
-    related_run_id: params.relatedRunId ?? null,
-    metadata: (params.metadata ?? {}) as Json,
-  });
-
-  if (error) {
-    throw new Error(error.message);
-  }
-}
-
 async function createHostedGeneratedOutput(params: {
   supabase: HostedSupabaseClient;
   run: GenerationRunRow;
@@ -730,30 +683,17 @@ async function failHostedRun(params: {
   }
 
   if (params.refundCredits && params.run.estimated_credits) {
-    const { data: account, error: accountError } = await params.supabase
-      .from("studio_accounts")
-      .select("credit_balance")
-      .eq("user_id", params.run.user_id)
-      .single();
-
-    if (accountError || !account) {
-      throw new Error(accountError?.message ?? "Could not refund hosted credits.");
-    }
-
-    await updateHostedAccountCredits({
-      supabase: params.supabase,
-      userId: params.run.user_id,
-      nextBalance: account.credit_balance + params.run.estimated_credits,
-    });
-    await insertCreditLedgerEntry({
+    await applyHostedCreditLedgerEntry({
       supabase: params.supabase,
       userId: params.run.user_id,
       deltaCredits: params.run.estimated_credits,
       reason: "generation_refund",
       relatedRunId: params.run.id,
+      idempotencyKey: `generation:${params.run.id}:failed_refund`,
+      sourceEventId: `generation_run:${params.run.id}:failed`,
       metadata: {
         status: "failed",
-      } as Json,
+      },
     });
   }
 }
@@ -900,29 +840,10 @@ export async function mutateHostedState(params: {
   user: User;
   mutation: HostedStudioMutation;
 }) {
-  const account = await ensureHostedAccount(params.supabase, params.user);
+  await ensureHostedAccount(params.supabase, params.user);
   const mutation = params.mutation;
 
   switch (mutation.action) {
-    case "purchase_credits": {
-      const nextBalance = account.credit_balance + mutation.credits;
-      await updateHostedAccountCredits({
-        supabase: params.supabase,
-        userId: params.user.id,
-        nextBalance,
-        activeCreditPack: mutation.credits,
-      });
-      await insertCreditLedgerEntry({
-        supabase: params.supabase,
-        userId: params.user.id,
-        deltaCredits: mutation.credits,
-        reason: "purchase",
-        metadata: {
-          pack_credits: mutation.credits,
-        } as Json,
-      });
-      break;
-    }
     case "set_enabled_models": {
       const { error } = await params.supabase
         .from("studio_accounts")
@@ -1199,20 +1120,17 @@ export async function mutateHostedState(params: {
         }
 
         if (run.estimated_credits) {
-          await updateHostedAccountCredits({
-            supabase: params.supabase,
-            userId: params.user.id,
-            nextBalance: account.credit_balance + run.estimated_credits,
-          });
-          await insertCreditLedgerEntry({
+          await applyHostedCreditLedgerEntry({
             supabase: params.supabase,
             userId: params.user.id,
             deltaCredits: run.estimated_credits,
             reason: "generation_refund",
             relatedRunId: run.id,
+            idempotencyKey: `generation:${run.id}:cancelled_refund`,
+            sourceEventId: `generation_run:${run.id}:cancelled`,
             metadata: {
               status: "cancelled",
-            } as Json,
+            },
           });
         }
       }
@@ -1563,21 +1481,18 @@ export async function queueHostedGeneration(params: {
     inputPosition += 1;
   }
 
-  await updateHostedAccountCredits({
-    supabase: params.supabase,
-    userId: params.user.id,
-    nextBalance: account.credit_balance - pricingQuote.billedCredits,
-  });
-  await insertCreditLedgerEntry({
+  await applyHostedCreditLedgerEntry({
     supabase: params.supabase,
     userId: params.user.id,
     deltaCredits: -pricingQuote.billedCredits,
     reason: "generation_hold",
     relatedRunId: runId,
+    idempotencyKey: `generation:${runId}:hold`,
+    sourceEventId: `generation_run:${runId}:hold`,
     metadata: {
       model_id: model.id,
       request_mode: requestMode,
-    } as Json,
+    },
   });
 
   await syncHostedUserQueue({

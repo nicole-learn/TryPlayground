@@ -1,6 +1,6 @@
 export type StudioModelKind = "image" | "video" | "text" | "audio";
 export type StudioModelSection = "images" | "videos" | "text" | "audio";
-export type StudioCreditPurchaseAmount = 10 | 100;
+export type StudioCreditPurchaseAmount = 100;
 export type StudioRunStatus =
   | "pending"
   | "queued"

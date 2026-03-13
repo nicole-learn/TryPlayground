@@ -12,32 +12,79 @@ export type Database = {
   };
   public: {
     Tables: {
-      credit_ledger: {
+      billing_customers: {
         Row: {
           created_at: string;
-          delta_credits: number;
           id: string;
+          livemode: boolean;
           metadata: Json;
-          reason: string;
-          related_run_id: string | null;
+          stripe_customer_id: string;
+          updated_at: string;
           user_id: string;
         };
         Insert: {
           created_at?: string;
-          delta_credits: number;
           id?: string;
+          livemode: boolean;
           metadata?: Json;
-          reason: string;
-          related_run_id?: string | null;
+          stripe_customer_id: string;
+          updated_at?: string;
           user_id: string;
         };
         Update: {
           created_at?: string;
+          id?: string;
+          livemode?: boolean;
+          metadata?: Json;
+          stripe_customer_id?: string;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "billing_customers_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "studio_accounts";
+            referencedColumns: ["user_id"];
+          },
+        ];
+      };
+      credit_ledger: {
+        Row: {
+          balance_after: number;
+          created_at: string;
+          delta_credits: number;
+          id: string;
+          idempotency_key: string | null;
+          metadata: Json;
+          reason: string;
+          related_run_id: string | null;
+          source_event_id: string | null;
+          user_id: string;
+        };
+        Insert: {
+          balance_after: number;
+          created_at?: string;
+          delta_credits: number;
+          id?: string;
+          idempotency_key?: string | null;
+          metadata?: Json;
+          reason: string;
+          related_run_id?: string | null;
+          source_event_id?: string | null;
+          user_id: string;
+        };
+        Update: {
+          balance_after?: number;
+          created_at?: string;
           delta_credits?: number;
           id?: string;
+          idempotency_key?: string | null;
           metadata?: Json;
           reason?: string;
           related_run_id?: string | null;
+          source_event_id?: string | null;
           user_id?: string;
         };
         Relationships: [
@@ -50,6 +97,161 @@ export type Database = {
           },
           {
             foreignKeyName: "credit_ledger_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "studio_accounts";
+            referencedColumns: ["user_id"];
+          },
+        ];
+      };
+      credit_packs: {
+        Row: {
+          created_at: string;
+          credits: number;
+          currency: string;
+          display_order: number;
+          id: string;
+          is_active: boolean;
+          metadata: Json;
+          name: string;
+          price_cents: number;
+          slug: string;
+          stripe_price_id_live: string | null;
+          stripe_price_id_test: string | null;
+          stripe_product_id_live: string | null;
+          stripe_product_id_test: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          created_at?: string;
+          credits: number;
+          currency?: string;
+          display_order?: number;
+          id?: string;
+          is_active?: boolean;
+          metadata?: Json;
+          name: string;
+          price_cents: number;
+          slug: string;
+          stripe_price_id_live?: string | null;
+          stripe_price_id_test?: string | null;
+          stripe_product_id_live?: string | null;
+          stripe_product_id_test?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          created_at?: string;
+          credits?: number;
+          currency?: string;
+          display_order?: number;
+          id?: string;
+          is_active?: boolean;
+          metadata?: Json;
+          name?: string;
+          price_cents?: number;
+          slug?: string;
+          stripe_price_id_live?: string | null;
+          stripe_price_id_test?: string | null;
+          stripe_product_id_live?: string | null;
+          stripe_product_id_test?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      credit_purchases: {
+        Row: {
+          amount_cents: number;
+          created_at: string;
+          credit_pack_id: string;
+          credited_at: string | null;
+          credits_amount: number;
+          currency: string;
+          fulfilled_ledger_entry_id: string | null;
+          id: string;
+          livemode: boolean;
+          metadata: Json;
+          quantity: number;
+          refund_ledger_entry_id: string | null;
+          refunded_at: string | null;
+          status: string;
+          stripe_charge_id: string | null;
+          stripe_checkout_session_id: string | null;
+          stripe_customer_id: string | null;
+          stripe_payment_intent_id: string | null;
+          stripe_refund_id: string | null;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          amount_cents: number;
+          created_at?: string;
+          credit_pack_id: string;
+          credited_at?: string | null;
+          credits_amount: number;
+          currency?: string;
+          fulfilled_ledger_entry_id?: string | null;
+          id?: string;
+          livemode: boolean;
+          metadata?: Json;
+          quantity?: number;
+          refund_ledger_entry_id?: string | null;
+          refunded_at?: string | null;
+          status: string;
+          stripe_charge_id?: string | null;
+          stripe_checkout_session_id?: string | null;
+          stripe_customer_id?: string | null;
+          stripe_payment_intent_id?: string | null;
+          stripe_refund_id?: string | null;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          amount_cents?: number;
+          created_at?: string;
+          credit_pack_id?: string;
+          credited_at?: string | null;
+          credits_amount?: number;
+          currency?: string;
+          fulfilled_ledger_entry_id?: string | null;
+          id?: string;
+          livemode?: boolean;
+          metadata?: Json;
+          quantity?: number;
+          refund_ledger_entry_id?: string | null;
+          refunded_at?: string | null;
+          status?: string;
+          stripe_charge_id?: string | null;
+          stripe_checkout_session_id?: string | null;
+          stripe_customer_id?: string | null;
+          stripe_payment_intent_id?: string | null;
+          stripe_refund_id?: string | null;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "credit_purchases_credit_pack_id_fkey";
+            columns: ["credit_pack_id"];
+            isOneToOne: false;
+            referencedRelation: "credit_packs";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "credit_purchases_fulfilled_ledger_entry_id_fkey";
+            columns: ["fulfilled_ledger_entry_id"];
+            isOneToOne: false;
+            referencedRelation: "credit_ledger";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "credit_purchases_refund_ledger_entry_id_fkey";
+            columns: ["refund_ledger_entry_id"];
+            isOneToOne: false;
+            referencedRelation: "credit_ledger";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "credit_purchases_user_id_fkey";
             columns: ["user_id"];
             isOneToOne: false;
             referencedRelation: "studio_accounts";
@@ -500,6 +702,45 @@ export type Database = {
           },
         ];
       };
+      stripe_webhook_events: {
+        Row: {
+          created_at: string;
+          error_message: string | null;
+          event_type: string;
+          id: string;
+          livemode: boolean;
+          payload: Json;
+          processed_at: string | null;
+          status: string;
+          stripe_event_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          created_at?: string;
+          error_message?: string | null;
+          event_type: string;
+          id?: string;
+          livemode: boolean;
+          payload?: Json;
+          processed_at?: string | null;
+          status: string;
+          stripe_event_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          created_at?: string;
+          error_message?: string | null;
+          event_type?: string;
+          id?: string;
+          livemode?: boolean;
+          payload?: Json;
+          processed_at?: string | null;
+          status?: string;
+          stripe_event_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       studio_accounts: {
         Row: {
           active_credit_pack: number | null;
@@ -580,9 +821,68 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      apply_tryplayground_credit_ledger_entry: {
+        Args: {
+          p_active_credit_pack?: number;
+          p_allow_negative_balance?: boolean;
+          p_delta_credits: number;
+          p_idempotency_key?: string;
+          p_metadata?: Json;
+          p_reason: string;
+          p_related_run_id?: string;
+          p_source_event_id?: string;
+          p_user_id: string;
+        };
+        Returns: {
+          balance_after: number;
+          created_at: string;
+          delta_credits: number;
+          id: string;
+          idempotency_key: string | null;
+          metadata: Json;
+          reason: string;
+          related_run_id: string | null;
+          source_event_id: string | null;
+          user_id: string;
+        };
+      };
       bump_studio_account_revision: {
         Args: { target_user_id: string };
         Returns: undefined;
+      };
+      fulfill_tryplayground_credit_purchase: {
+        Args: {
+          p_metadata?: Json;
+          p_purchase_id: string;
+          p_source_event_id?: string;
+          p_stripe_charge_id?: string;
+          p_stripe_checkout_session_id?: string;
+          p_stripe_customer_id?: string;
+          p_stripe_payment_intent_id?: string;
+        };
+        Returns: {
+          amount_cents: number;
+          created_at: string;
+          credit_pack_id: string;
+          credited_at: string | null;
+          credits_amount: number;
+          currency: string;
+          fulfilled_ledger_entry_id: string | null;
+          id: string;
+          livemode: boolean;
+          metadata: Json;
+          quantity: number;
+          refund_ledger_entry_id: string | null;
+          refunded_at: string | null;
+          status: string;
+          stripe_charge_id: string | null;
+          stripe_checkout_session_id: string | null;
+          stripe_customer_id: string | null;
+          stripe_payment_intent_id: string | null;
+          stripe_refund_id: string | null;
+          updated_at: string;
+          user_id: string;
+        };
       };
       get_tryplayground_active_hosted_user_count: {
         Args: Record<PropertyKey, never>;
