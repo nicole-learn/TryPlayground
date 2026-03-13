@@ -82,7 +82,7 @@ This is especially important for users who generate often. A good AI tool should
 
 The open-source version of Vyde Labs is designed for users who want full control.
 
-This version runs locally on a user's own machine. The user brings their own Fal API key, enters it through the in-app settings screen, and uses the same studio interface without needing a cloud deployment or managed account.
+This version runs locally on a user's own machine. The user brings their own Fal API key, enters it through the in-app provider settings screen, and uses the same studio interface without needing a cloud deployment or managed account.
 
 ### How the local version works
 
@@ -90,6 +90,7 @@ In the local version:
 
 - the user installs and runs Vyde Labs on their own computer
 - the user enters their Fal API key inside the app
+- the key stays only for the current app session unless the user chooses a more persistent setup later
 - generations are made using the user's own Fal account
 - files, history, and folders stay local
 - there is no billing layer inside Vyde Labs itself
@@ -103,7 +104,7 @@ The local version is meant to feel immediate.
 A user should be able to:
 
 1. launch the app
-2. open settings
+2. open provider settings
 3. paste in a Fal key
 4. start generating
 

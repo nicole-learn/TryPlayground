@@ -93,7 +93,7 @@ npm run dev
 Then:
 
 1. Open the app locally.
-2. Go to Settings.
+2. Open Provider Settings.
 3. Paste in your Fal API key.
 4. Start generating.
 
@@ -111,6 +111,7 @@ This keeps pricing transparent and easy to understand.
 ### Open Source / Local
 
 - your Fal key belongs to you
+- your Fal key is kept only for the current browser session
 - your local files stay on your machine
 - your history and folders are stored locally
 

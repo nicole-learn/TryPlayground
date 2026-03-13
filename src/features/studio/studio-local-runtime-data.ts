@@ -1,6 +1,7 @@
-"use client";
-
-import { STUDIO_MODELS, getModelById } from "./catalog";
+import {
+  STUDIO_MODEL_CATALOG,
+  getStudioModelById,
+} from "./studio-model-catalog";
 import type {
   GenerationRun,
   LibraryItem,
@@ -10,7 +11,7 @@ import type {
   StudioModelKind,
 } from "./types";
 
-export function createId(prefix: string) {
+export function createStudioId(prefix: string) {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return `${prefix}-${crypto.randomUUID()}`;
   }
@@ -93,7 +94,7 @@ function parseAspectRatioValue(value: string): number {
   return width / height;
 }
 
-export function createGeneratedItem(params: {
+export function createGeneratedLibraryItem(params: {
   model: StudioModelDefinition;
   draft: StudioDraft;
   createdAt: string;
@@ -114,7 +115,7 @@ export function createGeneratedItem(params: {
     ].join(" ");
 
     return {
-      id: createId("asset"),
+      id: createStudioId("asset"),
       title,
       kind: "text",
       source: "generated",
@@ -130,7 +131,7 @@ export function createGeneratedItem(params: {
   }
 
   return {
-    id: createId("asset"),
+    id: createStudioId("asset"),
     title,
     kind: params.model.kind,
     source: "generated",
@@ -154,7 +155,7 @@ export function createGeneratedItem(params: {
   };
 }
 
-export function createRunSummary(
+export function createGenerationRunSummary(
   model: StudioModelDefinition,
   draft: StudioDraft
 ) {
@@ -172,23 +173,23 @@ export function createRunSummary(
 function createSeedFolders() {
   const now = new Date().toISOString();
   return [
-    { id: createId("folder"), name: "References", createdAt: now },
-    { id: createId("folder"), name: "Prompts", createdAt: now },
-    { id: createId("folder"), name: "Concepts", createdAt: now },
+    { id: createStudioId("folder"), name: "References", createdAt: now },
+    { id: createStudioId("folder"), name: "Prompts", createdAt: now },
+    { id: createStudioId("folder"), name: "Concepts", createdAt: now },
   ] satisfies StudioFolder[];
 }
 
-export function buildDraftMap() {
+export function buildStudioDraftMap() {
   return Object.fromEntries(
-    STUDIO_MODELS.map((model) => [model.id, createDraft(model)])
+    STUDIO_MODEL_CATALOG.map((model) => [model.id, createDraft(model)])
   ) as Record<string, StudioDraft>;
 }
 
-export function createSeedState() {
+export function createStudioSeedState() {
   const folders = createSeedFolders();
-  const imageModel = getModelById("nano-banana-2");
-  const videoModel = getModelById("veo-3.1");
-  const textModel = getModelById("llm-router-gpt4-mini");
+  const imageModel = getStudioModelById("nano-banana-2");
+  const videoModel = getStudioModelById("veo-3.1");
+  const textModel = getStudioModelById("llm-router-gpt4-mini");
   const now = Date.now();
 
   const imageDraft = {
@@ -213,19 +214,19 @@ export function createSeedState() {
   ];
 
   const items = [
-    createGeneratedItem({
+    createGeneratedLibraryItem({
       model: imageModel,
       draft: imageDraft,
       createdAt: createdAt[0],
       folderId: folders[0].id,
     }),
-    createGeneratedItem({
+    createGeneratedLibraryItem({
       model: videoModel,
       draft: videoDraft,
       createdAt: createdAt[1],
       folderId: folders[1].id,
     }),
-    createGeneratedItem({
+    createGeneratedLibraryItem({
       model: textModel,
       draft: textDraft,
       createdAt: createdAt[2],
@@ -235,38 +236,38 @@ export function createSeedState() {
 
   const runs: GenerationRun[] = [
     {
-      id: createId("run"),
+      id: createStudioId("run"),
       modelId: imageModel.id,
       modelName: imageModel.name,
       kind: imageModel.kind,
       status: "completed",
       prompt: imageDraft.prompt,
       createdAt: createdAt[0],
-      summary: createRunSummary(imageModel, imageDraft),
+      summary: createGenerationRunSummary(imageModel, imageDraft),
       outputItemId: items[0].id,
       draftSnapshot: createDraftSnapshot(imageDraft),
     },
     {
-      id: createId("run"),
+      id: createStudioId("run"),
       modelId: videoModel.id,
       modelName: videoModel.name,
       kind: videoModel.kind,
       status: "completed",
       prompt: videoDraft.prompt,
       createdAt: createdAt[1],
-      summary: createRunSummary(videoModel, videoDraft),
+      summary: createGenerationRunSummary(videoModel, videoDraft),
       outputItemId: items[1].id,
       draftSnapshot: createDraftSnapshot(videoDraft),
     },
     {
-      id: createId("run"),
+      id: createStudioId("run"),
       modelId: textModel.id,
       modelName: textModel.name,
       kind: textModel.kind,
       status: "completed",
       prompt: textDraft.prompt,
       createdAt: createdAt[2],
-      summary: createRunSummary(textModel, textDraft),
+      summary: createGenerationRunSummary(textModel, textDraft),
       outputItemId: items[2].id,
       draftSnapshot: createDraftSnapshot(textDraft),
     },

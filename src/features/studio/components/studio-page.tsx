@@ -6,12 +6,12 @@ import { CreateTextDialog } from "./create-text-dialog";
 import { FloatingControlBar } from "./floating-control-bar";
 import { FolderDialog } from "./folder-dialog";
 import { FolderSidebar } from "./folder-sidebar";
-import { LocalSettingsDialog } from "./local-settings-dialog";
+import { ProviderSettingsDialog } from "./provider-settings-dialog";
 import { StudioGallery } from "./studio-gallery";
 import { StudioMobileRail } from "./studio-mobile-rail";
 import { StudioTopBar } from "./studio-top-bar";
 import { StudioWorkspaceShell } from "./studio-workspace-shell";
-import { useStudioApp } from "../use-studio-app";
+import { useStudioLocalRuntime } from "../use-studio-local-runtime";
 import type { LibraryItem } from "../types";
 
 const XL_BREAKPOINT_QUERY = "(min-width: 1280px)";
@@ -36,7 +36,7 @@ function getDownloadFileName(item: LibraryItem) {
 
 export function StudioPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const studio = useStudioApp();
+  const studio = useStudioLocalRuntime();
   const [isDesktopViewport, setIsDesktopViewport] = useState(() => {
     if (typeof window === "undefined") return true;
     return window.matchMedia(XL_BREAKPOINT_QUERY).matches;
@@ -176,7 +176,7 @@ export function StudioPage() {
             sizeLevel={studio.gallerySizeLevel}
             onCreateFolder={studio.openCreateFolder}
             onOpenCreateText={studio.openCreateTextComposer}
-            onOpenSettings={() => studio.setSettingsOpen(true)}
+            onOpenSettings={() => studio.setProviderSettingsOpen(true)}
             onOpenUpload={() => fileInputRef.current?.click()}
             onSelectFolder={studio.setSelectedFolderId}
             onSizeLevelChange={studio.setGallerySizeLevel}
@@ -203,7 +203,7 @@ export function StudioPage() {
             hasFalKey={studio.hasFalKey}
             onDeleteSelected={studio.deleteSelectedItems}
             onOpenCreateText={studio.openCreateTextComposer}
-            onOpenSettings={() => studio.setSettingsOpen(true)}
+            onOpenSettings={() => studio.setProviderSettingsOpen(true)}
             onOpenUpload={() => fileInputRef.current?.click()}
             onSizeLevelChange={studio.setGallerySizeLevel}
             onToggleSelectionMode={studio.toggleSelectionMode}
@@ -214,11 +214,11 @@ export function StudioPage() {
         }
       />
 
-      <LocalSettingsDialog
-        open={studio.settingsOpen}
-        initialValues={studio.settings}
-        onClose={() => studio.setSettingsOpen(false)}
-        onSave={studio.saveSettings}
+      <ProviderSettingsDialog
+        open={studio.providerSettingsOpen}
+        initialValues={studio.providerSettings}
+        onClose={() => studio.setProviderSettingsOpen(false)}
+        onSave={studio.saveProviderSettings}
       />
 
       <FolderDialog

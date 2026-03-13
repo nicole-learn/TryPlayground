@@ -2,6 +2,10 @@
 
 import { FolderPlus, MoreHorizontal, Trash2 } from "lucide-react";
 import { cn } from "@/lib/cn";
+import {
+  isStudioItemDrag,
+  parseDraggedLibraryItemIds,
+} from "../studio-drag-data";
 import type { StudioFolder } from "../types";
 
 interface FolderSidebarProps {
@@ -13,18 +17,6 @@ interface FolderSidebarProps {
   onDropItemsToFolder: (itemIds: string[], folderId: string | null) => void;
   onRenameFolder: (folderId: string) => void;
   onSelectFolder: (folderId: string | null) => void;
-}
-
-function parseDraggedItemIds(dataTransfer: DataTransfer) {
-  const rawValue = dataTransfer.getData("application/vnd.vydelabs.items");
-  if (!rawValue) return [];
-
-  try {
-    const parsed = JSON.parse(rawValue) as string[];
-    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
-  } catch {
-    return [];
-  }
 }
 
 interface FolderRowProps {
@@ -51,19 +43,19 @@ function FolderRow({
         onClick={onClick}
         onDragEnter={(event) => {
           if (!onDrop) return;
-          if (!event.dataTransfer.types.includes("application/vnd.vydelabs.items")) return;
+          if (!isStudioItemDrag(event.dataTransfer)) return;
           event.preventDefault();
         }}
         onDragOver={(event) => {
           if (!onDrop) return;
-          if (!event.dataTransfer.types.includes("application/vnd.vydelabs.items")) return;
+          if (!isStudioItemDrag(event.dataTransfer)) return;
           event.preventDefault();
           event.dataTransfer.dropEffect = "move";
         }}
         onDrop={(event) => {
           if (!onDrop) return;
           event.preventDefault();
-          onDrop(parseDraggedItemIds(event.dataTransfer));
+          onDrop(parseDraggedLibraryItemIds(event.dataTransfer));
         }}
         className={cn(
           "flex w-full items-center justify-between gap-3 rounded-xl px-4 py-3 text-left text-[15px] transition-all duration-150",

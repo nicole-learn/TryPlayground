@@ -80,6 +80,6 @@ export interface GenerationRun {
   };
 }
 
-export interface LocalProviderSettings {
+export interface StudioProviderSettings {
   falApiKey: string;
 }

@@ -13,8 +13,8 @@ export function StudioAccountButton({
     <button
       type="button"
       onClick={onClick}
-      aria-label="Local settings"
-      title="Local settings"
+      aria-label="Provider settings"
+      title="Provider settings"
       className="relative flex size-[42px] shrink-0 items-center justify-center rounded-full border border-white/10 bg-[color-mix(in_oklch,var(--primary)_25%,black)] text-sm font-semibold text-primary-foreground transition-all duration-150 hover:brightness-110 active:scale-[0.97]"
     >
       <span>V</span>

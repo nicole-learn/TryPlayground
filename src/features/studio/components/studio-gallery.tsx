@@ -3,6 +3,11 @@
 import { Copy, Loader2, Play, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
+import {
+  isStudioItemDrag,
+  parseDraggedLibraryItemIds,
+  setDraggedLibraryItemIds,
+} from "../studio-drag-data";
 import type { GenerationRun, LibraryItem } from "../types";
 
 interface StudioGalleryProps {
@@ -43,18 +48,6 @@ type GalleryDisplayItem =
 
 const ROW_HEIGHTS = [360, 320, 280, 240, 210, 180, 150];
 const TILE_GAP_PX = 3;
-
-function parseDraggedItemIds(dataTransfer: DataTransfer) {
-  const rawValue = dataTransfer.getData("application/vnd.vydelabs.items");
-  if (!rawValue) return [];
-
-  try {
-    const parsed = JSON.parse(rawValue) as string[];
-    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
-  } catch {
-    return [];
-  }
-}
 
 function buildRows(items: GalleryDisplayItem[], containerWidth: number, sizeLevel: number) {
   if (containerWidth <= 0 || items.length === 0) {
@@ -186,11 +179,7 @@ function AssetTile({
         onOpenItem(item.id);
       }}
       onDragStart={(event) => {
-        event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData(
-          "application/vnd.vydelabs.items",
-          JSON.stringify([item.id])
-        );
+        setDraggedLibraryItemIds(event.dataTransfer, [item.id]);
       }}
       className={cn(
         "group relative h-full w-full overflow-hidden outline-none transition focus-visible:ring-2 focus-visible:ring-primary/70 focus-visible:ring-offset-1 focus-visible:ring-offset-background",
@@ -353,12 +342,12 @@ export function StudioGallery({
       className="relative flex h-full min-h-0 min-w-0 flex-col bg-background"
       onDragEnter={(event) => {
         if (!allowDropMove || !onMoveDraggedItems) return;
-        if (!event.dataTransfer.types.includes("application/vnd.vydelabs.items")) return;
+        if (!isStudioItemDrag(event.dataTransfer)) return;
         event.preventDefault();
       }}
       onDragOver={(event) => {
         if (!allowDropMove || !onMoveDraggedItems) return;
-        if (!event.dataTransfer.types.includes("application/vnd.vydelabs.items")) return;
+        if (!isStudioItemDrag(event.dataTransfer)) return;
         event.preventDefault();
         event.dataTransfer.dropEffect = "move";
         setDropActive(true);
@@ -372,7 +361,7 @@ export function StudioGallery({
         if (!allowDropMove || !onMoveDraggedItems) return;
         event.preventDefault();
         setDropActive(false);
-        const itemIds = parseDraggedItemIds(event.dataTransfer);
+        const itemIds = parseDraggedLibraryItemIds(event.dataTransfer);
         onMoveDraggedItems(itemIds);
       }}
     >

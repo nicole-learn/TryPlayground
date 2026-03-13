@@ -1,6 +1,6 @@
 import type { StudioModelDefinition } from "./types";
 
-export const STUDIO_MODELS: StudioModelDefinition[] = [
+export const STUDIO_MODEL_CATALOG: StudioModelDefinition[] = [
   {
     id: "nano-banana-2",
     name: "Nano Banana 2",
@@ -152,7 +152,7 @@ export const STUDIO_MODELS: StudioModelDefinition[] = [
     providerLabel: "Fal via OpenRouter",
     kind: "text",
     section: "text",
-    description: "Quick drafting, iteration, and idea expansion inside the same studio workflow.",
+    description: "Quick drafting, iteration, and idea expansion inside the same studio.",
     heroGradient: "from-indigo-400/25 via-blue-300/10 to-transparent",
     tags: ["Text", "Responsive", "Drafting"],
     promptPlaceholder:
@@ -176,7 +176,7 @@ export const STUDIO_MODELS: StudioModelDefinition[] = [
   },
 ];
 
-export const MODEL_SECTIONS = [
+export const STUDIO_MODEL_SECTIONS = [
   {
     id: "images",
     title: "Images",
@@ -194,6 +194,9 @@ export const MODEL_SECTIONS = [
   },
 ] as const;
 
-export function getModelById(modelId: string) {
-  return STUDIO_MODELS.find((model) => model.id === modelId) ?? STUDIO_MODELS[0];
+export function getStudioModelById(modelId: string) {
+  return (
+    STUDIO_MODEL_CATALOG.find((model) => model.id === modelId) ??
+    STUDIO_MODEL_CATALOG[0]
+  );
 }

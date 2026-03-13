@@ -1,26 +1,26 @@
 "use client";
 
 import { ModalShell } from "./modal-shell";
-import type { LocalProviderSettings } from "../types";
+import type { StudioProviderSettings } from "../types";
 
-interface LocalSettingsDialogProps {
+interface ProviderSettingsDialogProps {
   open: boolean;
-  initialValues: LocalProviderSettings;
+  initialValues: StudioProviderSettings;
   onClose: () => void;
-  onSave: (settings: LocalProviderSettings) => void;
+  onSave: (settings: StudioProviderSettings) => void;
 }
 
-export function LocalSettingsDialog({
+export function ProviderSettingsDialog({
   open,
   initialValues,
   onClose,
   onSave,
-}: LocalSettingsDialogProps) {
+}: ProviderSettingsDialogProps) {
   return (
     <ModalShell
       open={open}
-      title="Local Settings"
-      description="Connect your Fal API key so this local workspace can generate text, images, and video."
+      title="Provider Settings"
+      description="Connect your Fal API key so this workspace can generate text, images, and video."
       onClose={onClose}
     >
       <form
@@ -46,8 +46,8 @@ export function LocalSettingsDialog({
         </label>
 
         <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm leading-6 text-white/62">
-          The local version keeps your key in this browser so you can run Vyde Labs
-          with your own Fal account.
+          For now, Vyde Labs keeps your key only for the current browser session
+          instead of saving it permanently.
         </div>
 
         <div className="flex items-center justify-end gap-3">
@@ -60,7 +60,7 @@ export function LocalSettingsDialog({
           </button>
           <button
             type="submit"
-            className="rounded-full bg-cyan-400 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-cyan-300"
+            className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:brightness-110"
           >
             Save Settings
           </button>

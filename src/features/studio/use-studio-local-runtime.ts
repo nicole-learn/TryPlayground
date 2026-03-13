@@ -1,147 +1,64 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MODEL_SECTIONS, STUDIO_MODELS, getModelById } from "./catalog";
 import {
   loadStoredGridDensity,
-  loadStoredSettings,
+  loadStoredProviderSettings,
   saveStoredGridDensity,
-  saveStoredSettings,
-} from "./local-storage";
+  saveStoredProviderSettings,
+} from "./studio-browser-storage";
 import {
-  buildDraftMap,
+  buildStudioDraftMap,
   createDraft,
   createDraftSnapshot,
-  createGeneratedItem,
-  createId,
-  createRunSummary,
-  createSeedState,
-} from "./mock-data";
+  createGeneratedLibraryItem,
+  createGenerationRunSummary,
+  createStudioId,
+  createStudioSeedState,
+} from "./studio-local-runtime-data";
+import {
+  createFolderItemCounts,
+  createTextLibraryItem,
+  createUploadedLibraryItem,
+  hasFolderNameConflict,
+  releaseUploadedPreview,
+  removePendingTimerId,
+  revokePreviewUrl,
+} from "./studio-local-runtime-helpers";
+import {
+  STUDIO_MODEL_CATALOG,
+  STUDIO_MODEL_SECTIONS,
+  getStudioModelById,
+} from "./studio-model-catalog";
 import type {
   DraftReference,
   GenerationRun,
-  LibraryItem,
-  LocalProviderSettings,
   StudioDraft,
   StudioFolder,
+  StudioProviderSettings,
 } from "./types";
 
-function revokePreview(url: string | null | undefined) {
-  if (url?.startsWith("blob:")) {
-    URL.revokeObjectURL(url);
-  }
-}
-
-function releaseUploadedPreview(
-  item: LibraryItem | undefined,
-  previewUrls: Map<string, string>
-) {
-  if (!item || item.source !== "uploaded" || !item.previewUrl) {
-    return;
-  }
-
-  revokePreview(previewUrls.get(item.id) ?? item.previewUrl);
-  previewUrls.delete(item.id);
-}
-
-function createFolderCounts(folders: StudioFolder[], items: LibraryItem[]) {
-  return Object.fromEntries(
-    folders.map((folder) => [
-      folder.id,
-      items.filter((item) => item.folderId === folder.id).length,
-    ])
-  ) as Record<string, number>;
-}
-
-function removeTimer(timerIds: number[], timerId: number) {
-  return timerIds.filter((entry) => entry !== timerId);
-}
-
-function createTextItem(params: {
-  title: string;
-  body: string;
-  folderId: string | null;
-}): LibraryItem {
-  const trimmedBody = params.body.trim();
-  const fallbackTitle = trimmedBody.slice(0, 36) || "Text note";
-
-  return {
-    id: createId("asset"),
-    title: params.title.trim() || fallbackTitle,
-    kind: "text",
-    source: "uploaded",
-    previewUrl: null,
-    contentText: trimmedBody,
-    createdAt: new Date().toISOString(),
-    modelId: null,
-    prompt: trimmedBody,
-    meta: "Text note",
-    aspectRatio: 0.82,
-    folderId: params.folderId,
-  };
-}
-
-function createUploadedItem(file: File, folderId: string | null): LibraryItem {
-  const fileType = file.type.toLowerCase();
-  const kind =
-    fileType.startsWith("image/")
-      ? "image"
-      : fileType.startsWith("video/")
-        ? "video"
-        : "file";
-  const previewUrl =
-    kind === "image" || kind === "video" ? URL.createObjectURL(file) : null;
-  const aspectRatio =
-    kind === "video" ? 16 / 9 : kind === "image" ? 4 / 5 : 0.82;
-
-  return {
-    id: createId("asset"),
-    title: file.name,
-    kind,
-    source: "uploaded",
-    previewUrl,
-    contentText: null,
-    createdAt: new Date().toISOString(),
-    modelId: null,
-    prompt: "",
-    meta: `${file.type || "File"} • ${(file.size / 1024 / 1024).toFixed(1)} MB`,
-    aspectRatio,
-    folderId,
-  };
-}
-
-function hasFolderNameConflict(
-  folders: StudioFolder[],
-  nextName: string,
-  targetFolderId: string | null
-) {
-  const normalizedName = nextName.trim().toLowerCase();
-  return folders.some(
-    (folder) =>
-      folder.id !== targetFolderId &&
-      folder.name.trim().toLowerCase() === normalizedName
-  );
-}
-
-export function useStudioApp() {
-  const seedState = useMemo(() => createSeedState(), []);
+export function useStudioLocalRuntime() {
+  const initialStudioState = useMemo(() => createStudioSeedState(), []);
   const previewUrlsRef = useRef(new Map<string, string>());
   const pendingTimersRef = useRef<number[]>([]);
 
-  const [models] = useState(STUDIO_MODELS);
-  const [selectedModelId, setSelectedModelId] = useState(STUDIO_MODELS[0].id);
+  const [models] = useState(STUDIO_MODEL_CATALOG);
+  const [selectedModelId, setSelectedModelId] = useState(
+    STUDIO_MODEL_CATALOG[0].id
+  );
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
-  const [folders, setFolders] = useState(seedState.folders);
-  const [items, setItems] = useState(seedState.items);
-  const [runs, setRuns] = useState(seedState.runs);
-  const [draftsByModelId, setDraftsByModelId] = useState(buildDraftMap);
+  const [folders, setFolders] = useState(initialStudioState.folders);
+  const [items, setItems] = useState(initialStudioState.items);
+  const [runs, setRuns] = useState(initialStudioState.runs);
+  const [draftsByModelId, setDraftsByModelId] = useState(buildStudioDraftMap);
   const [gallerySizeLevel, setGallerySizeLevel] = useState(
     () => loadStoredGridDensity() ?? 2
   );
-  const [settings, setSettings] = useState<LocalProviderSettings>(
-    () => loadStoredSettings() ?? { falApiKey: "" }
+  const [providerSettings, setProviderSettings] = useState<StudioProviderSettings>(
+    () => loadStoredProviderSettings() ?? { falApiKey: "" }
   );
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [providerSettingsOpen, setProviderSettingsOpen] = useState(false);
   const [folderEditorOpen, setFolderEditorOpen] = useState(false);
   const [folderEditorMode, setFolderEditorMode] = useState<"create" | "rename">(
     "create"
@@ -162,8 +79,8 @@ export function useStudioApp() {
   }, [gallerySizeLevel]);
 
   useEffect(() => {
-    saveStoredSettings(settings);
-  }, [settings]);
+    saveStoredProviderSettings(providerSettings);
+  }, [providerSettings]);
 
   useEffect(() => {
     const previewUrls = previewUrlsRef.current;
@@ -171,7 +88,7 @@ export function useStudioApp() {
 
     return () => {
       for (const previewUrl of previewUrls.values()) {
-        revokePreview(previewUrl);
+        revokePreviewUrl(previewUrl);
       }
 
       for (const timerId of pendingTimers) {
@@ -212,7 +129,7 @@ export function useStudioApp() {
   );
 
   const folderCounts = useMemo(
-    () => createFolderCounts(folders, items),
+    () => createFolderItemCounts(folders, items),
     [folders, items]
   );
 
@@ -222,7 +139,7 @@ export function useStudioApp() {
   );
 
   const selectedItemCount = selectedItemIds.length;
-  const hasFalKey = settings.falApiKey.trim().length > 0;
+  const hasFalKey = providerSettings.falApiKey.trim().length > 0;
 
   const updateDraft = useCallback(
     (patch: Partial<StudioDraft>) => {
@@ -242,7 +159,7 @@ export function useStudioApp() {
       if (files.length === 0) return;
 
       const nextReferences: DraftReference[] = files.map((file) => ({
-        id: createId("ref"),
+        id: createStudioId("ref"),
         file,
       }));
 
@@ -329,7 +246,7 @@ export function useStudioApp() {
 
     if (folderEditorMode === "create") {
       const nextFolder: StudioFolder = {
-        id: createId("folder"),
+        id: createStudioId("folder"),
         name: nextName,
         createdAt: new Date().toISOString(),
       };
@@ -375,13 +292,14 @@ export function useStudioApp() {
   const deleteFolder = useCallback(
     (folderId: string) => {
       setFolders((current) => current.filter((folder) => folder.id !== folderId));
-      moveItemsToFolder(
-        items.filter((item) => item.folderId === folderId).map((item) => item.id),
-        null
+      setItems((current) =>
+        current.map((item) =>
+          item.folderId === folderId ? { ...item, folderId: null } : item
+        )
       );
       setSelectedFolderId((current) => (current === folderId ? null : current));
     },
-    [items, moveItemsToFolder]
+    []
   );
 
   const reuseRun = useCallback(
@@ -389,7 +307,7 @@ export function useStudioApp() {
       const run = runs.find((entry) => entry.id === runId);
       if (!run) return;
 
-      const nextModel = getModelById(run.modelId);
+      const nextModel = getStudioModelById(run.modelId);
       setSelectedModelId(nextModel.id);
       setDraftsByModelId((current) => ({
         ...current,
@@ -414,7 +332,7 @@ export function useStudioApp() {
         return;
       }
 
-      const nextModel = getModelById(item.modelId);
+      const nextModel = getStudioModelById(item.modelId);
       setSelectedModelId(nextModel.id);
       setDraftsByModelId((current) => ({
         ...current,
@@ -491,7 +409,9 @@ export function useStudioApp() {
     (files: File[]) => {
       if (files.length === 0) return;
 
-      const nextItems = files.map((file) => createUploadedItem(file, selectedFolderId));
+      const nextItems = files.map((file) =>
+        createUploadedLibraryItem(file, selectedFolderId)
+      );
 
       for (const item of nextItems) {
         if (item.previewUrl) {
@@ -504,10 +424,15 @@ export function useStudioApp() {
     [selectedFolderId]
   );
 
-  const saveSettings = useCallback((nextSettings: LocalProviderSettings) => {
-    setSettings(nextSettings);
-    setSettingsOpen(false);
-  }, []);
+  const saveProviderSettings = useCallback(
+    (nextSettings: StudioProviderSettings) => {
+      setProviderSettings({
+        falApiKey: nextSettings.falApiKey.trim(),
+      });
+      setProviderSettingsOpen(false);
+    },
+    []
+  );
 
   const openCreateTextComposer = useCallback(() => {
     setCreateTextTitle("");
@@ -526,7 +451,7 @@ export function useStudioApp() {
       return;
     }
 
-    const nextItem = createTextItem({
+    const nextItem = createTextLibraryItem({
       title: createTextTitle,
       body: createTextBody,
       folderId: selectedFolderId,
@@ -542,7 +467,7 @@ export function useStudioApp() {
     }
 
     const createdAt = new Date().toISOString();
-    const runId = createId("run");
+    const runId = createStudioId("run");
     const run: GenerationRun = {
       id: runId,
       modelId: selectedModel.id,
@@ -551,7 +476,7 @@ export function useStudioApp() {
       status: "running",
       prompt: currentDraft.prompt,
       createdAt,
-      summary: createRunSummary(selectedModel, currentDraft),
+      summary: createGenerationRunSummary(selectedModel, currentDraft),
       outputItemId: null,
       draftSnapshot: createDraftSnapshot(currentDraft),
     };
@@ -559,14 +484,17 @@ export function useStudioApp() {
     setRuns((current) => [run, ...current]);
 
     const timeoutId = window.setTimeout(() => {
-      const nextItem = createGeneratedItem({
+      const nextItem = createGeneratedLibraryItem({
         model: selectedModel,
         draft: currentDraft,
         createdAt,
         folderId: selectedFolderId,
       });
 
-      pendingTimersRef.current = removeTimer(pendingTimersRef.current, timeoutId);
+      pendingTimersRef.current = removePendingTimerId(
+        pendingTimersRef.current,
+        timeoutId
+      );
 
       setItems((current) => [nextItem, ...current]);
       setRuns((current) =>
@@ -602,7 +530,7 @@ export function useStudioApp() {
     generate,
     hasFalKey,
     items,
-    modelSections: MODEL_SECTIONS,
+    modelSections: STUDIO_MODEL_SECTIONS,
     models,
     moveItemsToFolder,
     openCreateFolder,
@@ -613,7 +541,9 @@ export function useStudioApp() {
     reuseItem,
     reuseRun,
     saveFolder,
-    saveSettings,
+    providerSettings,
+    providerSettingsOpen,
+    saveProviderSettings,
     selectedFolder,
     selectedFolderId,
     selectedFolderItems,
@@ -630,9 +560,7 @@ export function useStudioApp() {
     setGallerySizeLevel,
     setSelectedFolderId,
     setSelectedModelId,
-    setSettingsOpen,
-    settings,
-    settingsOpen,
+    setProviderSettingsOpen,
     toggleItemSelection,
     toggleSelectionMode,
     ungroupedItems,
