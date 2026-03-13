@@ -68,7 +68,21 @@ export function StudioTopBar({
 
   return (
     <header className="flex h-full items-center gap-3 border-b border-white/8 bg-black px-3">
-      <div className="min-w-0 flex-1" />
+      <div className="flex min-w-0 flex-1 items-center">
+        <div className="flex min-w-0 items-center gap-2.5">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/logo-dark.svg"
+            alt="Vyde Labs"
+            className="h-7 w-auto shrink-0"
+            draggable={false}
+          />
+          <div className="min-w-0 text-[18px] font-semibold tracking-tight">
+            <span className="text-primary">Vyde</span>
+            <span className="text-foreground"> Labs</span>
+          </div>
+        </div>
+      </div>
 
       <div className="ml-auto flex shrink-0 items-center gap-1.5">
         <ActionPillButton
