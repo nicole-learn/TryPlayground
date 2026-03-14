@@ -4,6 +4,7 @@ import {
   Download,
   FileText,
   FolderPlus,
+  MessageSquare,
   SquareMousePointer,
   Trash2,
   Upload,
@@ -32,6 +33,7 @@ interface StudioMobileRailProps {
   onCreateFolder: () => void;
   onOpenCreateText: () => void;
   onOpenAccount: () => void;
+  onOpenFeedback: () => void;
   onOpenUpload: () => void;
   onSelectFolder: (folderId: string | null) => void;
   onSizeLevelChange: (value: number) => void;
@@ -98,6 +100,7 @@ export function StudioMobileRail({
   onCreateFolder,
   onOpenCreateText,
   onOpenAccount,
+  onOpenFeedback,
   onOpenUpload,
   onSelectFolder,
   onSizeLevelChange,
@@ -212,6 +215,10 @@ export function StudioMobileRail({
 
         <RailButton ariaLabel="Upload files" onClick={onOpenUpload}>
           <Upload className="size-5" />
+        </RailButton>
+
+        <RailButton ariaLabel="Feedback" onClick={onOpenFeedback}>
+          <MessageSquare className="size-5" />
         </RailButton>
       </div>
     </aside>

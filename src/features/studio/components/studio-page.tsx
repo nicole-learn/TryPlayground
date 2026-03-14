@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AssetDetailDialog } from "./asset-detail-dialog";
 import { CreateTextDialog } from "./create-text-dialog";
+import { FeedbackDialog } from "./feedback-dialog";
 import { FloatingControlBar } from "./floating-control-bar";
 import { FolderDeleteDialog } from "./folder-delete-dialog";
 import { FolderDialog } from "./folder-dialog";
@@ -13,6 +14,7 @@ import { StudioDevModeOverlay } from "./studio-dev-mode-overlay";
 import { StudioDragPreviewOverlay } from "./studio-drag-preview-overlay";
 import { StudioGallery } from "./studio-gallery";
 import { StudioMobileRail } from "./studio-mobile-rail";
+import { StudioMessageDialog } from "./studio-message-dialog";
 import { StudioSettingsDialog } from "./studio-settings-dialog";
 import { StudioTopBar } from "./studio-top-bar";
 import { UploadFilesDialog } from "./upload-files-dialog";
@@ -349,6 +351,7 @@ export function StudioPage({
             onCreateFolder={studio.openCreateFolder}
             onOpenCreateText={studio.openCreateTextComposer}
             onOpenAccount={openAccountSurface}
+            onOpenFeedback={studio.openFeedbackDialog}
             onOpenUpload={studio.openUploadDialog}
             onSelectFolder={studio.setSelectedFolderId}
             onSizeLevelChange={studio.setGallerySizeLevel}
@@ -384,6 +387,7 @@ export function StudioPage({
             onDownloadSelected={downloadSelectedItems}
             onOpenCreateText={studio.openCreateTextComposer}
             onOpenAccount={openAccountSurface}
+            onOpenFeedback={studio.openFeedbackDialog}
             onOpenUpload={studio.openUploadDialog}
             onSizeLevelChange={studio.setGallerySizeLevel}
             onToggleSelectionMode={studio.toggleSelectionMode}
@@ -409,10 +413,24 @@ export function StudioPage({
         onContinue={studio.signInWithGoogleHostedAccount}
       />
 
+      <FeedbackDialog
+        errorMessage={studio.feedbackErrorMessage}
+        message={studio.feedbackMessage}
+        open={studio.feedbackDialogOpen}
+        pending={studio.feedbackSaving}
+        onClose={studio.closeFeedbackDialog}
+        onMessageChange={studio.updateFeedbackMessage}
+        onSubmit={studio.submitFeedback}
+      />
+
       <StudioSettingsDialog
         key={`${appMode}:${studio.settingsDialogOpen ? "open" : "closed"}`}
         appMode={appMode}
+        accountActionErrorMessage={studio.accountActionErrorMessage}
+        accountActionPending={studio.accountActionPending}
         hostedAccount={studio.hostedAccount}
+        modelConfigurationErrorMessage={studio.modelConfigurationErrorMessage}
+        modelConfigurationPending={studio.modelConfigurationPending}
         modelConfiguration={studio.modelConfiguration}
         open={studio.settingsDialogOpen}
         purchaseErrorMessage={studio.purchaseCreditsErrorMessage}
@@ -466,6 +484,7 @@ export function StudioPage({
       />
 
       <UploadFilesDialog
+        errorMessage={studio.uploadErrorMessage}
         folders={studio.folders}
         loading={studio.uploadAssetsLoading}
         open={studio.uploadDialogOpen}
@@ -495,6 +514,13 @@ export function StudioPage({
       <QueueLimitDialog
         open={studio.queueLimitDialogOpen}
         onClose={studio.closeQueueLimitDialog}
+      />
+
+      <StudioMessageDialog
+        open={studio.generationErrorDialogOpen}
+        title="Generation Error"
+        message={studio.generationErrorMessage}
+        onClose={studio.closeGenerationErrorDialog}
       />
     </>
   );

@@ -6,6 +6,7 @@ import type { StudioFolder } from "../types";
 import { STUDIO_MEDIA_UPLOAD_ACCEPT } from "../studio-local-runtime-helpers";
 
 interface UploadFilesDialogProps {
+  errorMessage?: string | null;
   folders: StudioFolder[];
   loading: boolean;
   open: boolean;
@@ -16,6 +17,7 @@ interface UploadFilesDialogProps {
 }
 
 export function UploadFilesDialog({
+  errorMessage = null,
   folders,
   loading,
   open,
@@ -32,7 +34,7 @@ export function UploadFilesDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 backdrop-blur-[1px]"
+      className="fixed inset-0 z-[220] flex items-center justify-center bg-background/60 backdrop-blur-[1px]"
       onClick={(event) => {
         if (event.target === event.currentTarget && !loading) {
           onClose();
@@ -105,6 +107,14 @@ export function UploadFilesDialog({
                   </button>
                 );
               })}
+            </div>
+          </div>
+        ) : null}
+
+        {errorMessage ? (
+          <div className="border-t border-white/10 px-5 py-3">
+            <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-100/92">
+              {errorMessage}
             </div>
           </div>
         ) : null}

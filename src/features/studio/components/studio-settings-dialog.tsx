@@ -25,8 +25,12 @@ type HostedSettingsTab = "credits" | "models" | "account";
 type LocalSettingsTab = "api-key" | "models";
 
 interface StudioSettingsDialogProps {
+  accountActionErrorMessage: string | null;
+  accountActionPending: "delete" | "sign_out" | null;
   appMode: StudioAppMode;
   hostedAccount: StudioHostedAccount | null;
+  modelConfigurationErrorMessage: string | null;
+  modelConfigurationPending: boolean;
   modelConfiguration: StudioModelConfiguration;
   open: boolean;
   purchaseErrorMessage: string | null;
@@ -203,10 +207,14 @@ function ApiKeyTab({
 }
 
 function ModelConfigurationTab({
+  errorMessage,
   modelConfiguration,
+  pending,
   onToggleModelEnabled,
 }: {
+  errorMessage: string | null;
   modelConfiguration: StudioModelConfiguration;
+  pending: boolean;
   onToggleModelEnabled: (modelId: string) => void;
 }) {
   const [searchValue, setSearchValue] = useState("");
@@ -248,14 +256,14 @@ function ModelConfigurationTab({
             <button
               key={model.id}
               type="button"
-              disabled={isLastEnabled}
+              disabled={isLastEnabled || pending}
               onClick={() => onToggleModelEnabled(model.id)}
               className={cn(
                 "rounded-2xl border px-4 py-3 text-left text-sm font-medium transition",
                 enabled
                   ? "border-primary/45 bg-primary/12 text-primary"
                   : "border-white/10 bg-white/[0.03] text-white/78 hover:border-white/20 hover:bg-white/[0.05] hover:text-white",
-                isLastEnabled ? "cursor-not-allowed opacity-60" : ""
+                isLastEnabled || pending ? "cursor-not-allowed opacity-60" : ""
               )}
             >
               {model.name}
@@ -263,6 +271,18 @@ function ModelConfigurationTab({
           );
         })}
       </div>
+
+      {pending ? (
+        <div className="rounded-2xl border border-primary/18 bg-primary/10 px-4 py-3 text-sm text-primary-foreground">
+          Saving model configuration...
+        </div>
+      ) : null}
+
+      {errorMessage ? (
+        <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-100/92">
+          {errorMessage}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -316,13 +336,19 @@ function CreditsTab({
 
 function AccountInformationTab({
   account,
+  errorMessage,
+  pendingAction,
   onDeleteAccount,
   onSignOut,
 }: {
   account: StudioHostedAccount;
+  errorMessage: string | null;
+  pendingAction: "delete" | "sign_out" | null;
   onDeleteAccount: () => Promise<void> | void;
   onSignOut: () => Promise<void> | void;
 }) {
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
   return (
     <div className="space-y-4">
       <div className="rounded-[28px] border border-white/8 bg-white/[0.03] p-5">
@@ -353,18 +379,61 @@ function AccountInformationTab({
         </div>
       </div>
 
+      {confirmingDelete ? (
+        <div className="rounded-[28px] border border-red-500/18 bg-red-500/10 p-5">
+          <div className="text-sm font-medium text-red-100">Delete account?</div>
+          <div className="mt-2 text-sm leading-6 text-red-100/80">
+            This removes your hosted account and its TryPlayground workspace data.
+          </div>
+          <div className="mt-4 flex flex-wrap justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => setConfirmingDelete(false)}
+              disabled={pendingAction !== null}
+              className="rounded-full border border-white/12 px-5 py-2.5 text-sm font-medium text-white/76 transition hover:border-white/20 hover:text-white disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void onDeleteAccount()}
+              disabled={pendingAction !== null}
+              className="inline-flex items-center gap-2 rounded-full border border-red-500/28 px-5 py-2.5 text-sm font-medium text-red-200 transition hover:bg-red-500/10 disabled:opacity-60"
+            >
+              {pendingAction === "delete" ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : null}
+              <span>
+                {pendingAction === "delete" ? "Deleting..." : "Delete Account"}
+              </span>
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {errorMessage ? (
+        <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-100/92">
+          {errorMessage}
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap justify-end gap-3 pt-2">
         <button
           type="button"
           onClick={() => void onSignOut()}
-          className="rounded-full border border-white/12 px-5 py-2.5 text-sm font-medium text-white/76 transition hover:border-white/20 hover:text-white"
+          disabled={pendingAction !== null}
+          className="inline-flex items-center gap-2 rounded-full border border-white/12 px-5 py-2.5 text-sm font-medium text-white/76 transition hover:border-white/20 hover:text-white disabled:opacity-60"
         >
-          Sign Out
+          {pendingAction === "sign_out" ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : null}
+          <span>{pendingAction === "sign_out" ? "Signing Out..." : "Sign Out"}</span>
         </button>
         <button
           type="button"
-          onClick={() => void onDeleteAccount()}
-          className="rounded-full border border-red-500/28 px-5 py-2.5 text-sm font-medium text-red-200 transition hover:bg-red-500/10"
+          onClick={() => setConfirmingDelete(true)}
+          disabled={pendingAction !== null}
+          className="rounded-full border border-red-500/28 px-5 py-2.5 text-sm font-medium text-red-200 transition hover:bg-red-500/10 disabled:opacity-60"
         >
           Delete Account
         </button>
@@ -374,8 +443,12 @@ function AccountInformationTab({
 }
 
 export function StudioSettingsDialog({
+  accountActionErrorMessage,
+  accountActionPending,
   appMode,
   hostedAccount,
+  modelConfigurationErrorMessage,
+  modelConfigurationPending,
   modelConfiguration,
   open,
   purchaseErrorMessage,
@@ -469,12 +542,16 @@ export function StudioSettingsDialog({
               />
             ) : hostedTab === "models" ? (
               <ModelConfigurationTab
+                errorMessage={modelConfigurationErrorMessage}
                 modelConfiguration={modelConfiguration}
+                pending={modelConfigurationPending}
                 onToggleModelEnabled={onToggleModelEnabled}
               />
             ) : hostedAccount ? (
               <AccountInformationTab
                 account={hostedAccount}
+                errorMessage={accountActionErrorMessage}
+                pendingAction={accountActionPending}
                 onDeleteAccount={onDeleteAccount}
                 onSignOut={onSignOut}
               />
@@ -488,7 +565,9 @@ export function StudioSettingsDialog({
             />
           ) : (
             <ModelConfigurationTab
+              errorMessage={modelConfigurationErrorMessage}
               modelConfiguration={modelConfiguration}
+              pending={modelConfigurationPending}
               onToggleModelEnabled={onToggleModelEnabled}
             />
           )}

@@ -53,6 +53,7 @@ import {
   subscribeToHostedAuthChanges,
 } from "./studio-hosted-session";
 import type {
+  LocalStudioGenerateInputDescriptor,
   LocalStudioMutation,
   LocalStudioSnapshotResponse,
   LocalStudioSyncResponse,
@@ -82,6 +83,7 @@ import type {
   StudioVideoInputMode,
   StudioWorkspaceSnapshot,
 } from "./types";
+import { LOCAL_FAL_KEY_HEADER } from "./studio-provider-constants";
 
 const EMPTY_PROVIDER_SETTINGS: StudioProviderSettings = {
   falApiKey: "",
@@ -157,12 +159,28 @@ async function fetchHostedWithSession(
   throw new Error("Your hosted session expired. Sign in with Google again.");
 }
 
-async function fetchLocalBootstrap(signal?: AbortSignal) {
+function createLocalFalHeaders(falApiKey?: string | null) {
+  const headers = new Headers();
+  if (falApiKey?.trim()) {
+    headers.set(LOCAL_FAL_KEY_HEADER, falApiKey.trim());
+  }
+  return headers;
+}
+
+function isAbortRequestError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+async function fetchLocalBootstrap(params?: {
+  falApiKey?: string | null;
+  signal?: AbortSignal;
+}) {
   const response = await fetch("/api/studio/local/bootstrap", {
     method: "GET",
+    headers: createLocalFalHeaders(params?.falApiKey),
     cache: "no-store",
     credentials: "same-origin",
-    signal,
+    signal: params?.signal,
   });
   const payload = (await response.json()) as LocalStudioSyncResponse & {
     error?: string;
@@ -177,6 +195,7 @@ async function fetchLocalBootstrap(signal?: AbortSignal) {
 
 async function fetchLocalSync(params: {
   sinceRevision: number | null;
+  falApiKey?: string | null;
   signal?: AbortSignal;
 }) {
   const searchParams = new URLSearchParams();
@@ -186,6 +205,7 @@ async function fetchLocalSync(params: {
 
   const response = await fetch(`/api/studio/local/sync?${searchParams.toString()}`, {
     method: "GET",
+    headers: createLocalFalHeaders(params.falApiKey),
     cache: "no-store",
     credentials: "same-origin",
     signal: params.signal,
@@ -203,13 +223,16 @@ async function fetchLocalSync(params: {
 
 async function mutateLocalSnapshot(
   mutation: LocalStudioMutation,
+  falApiKey?: string | null,
   signal?: AbortSignal
 ) {
   const response = await fetch("/api/studio/local/mutate", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: (() => {
+      const headers = createLocalFalHeaders(falApiKey);
+      headers.set("Content-Type", "application/json");
+      return headers;
+    })(),
     body: JSON.stringify(mutation),
     cache: "no-store",
     credentials: "same-origin",
@@ -229,6 +252,7 @@ async function mutateLocalSnapshot(
 async function uploadLocalFiles(
   files: File[],
   folderId: string | null,
+  falApiKey?: string | null,
   signal?: AbortSignal
 ) {
   const manifest = (
@@ -283,6 +307,7 @@ async function uploadLocalFiles(
   const response = await fetch("/api/studio/local/uploads", {
     method: "POST",
     body: formData,
+    headers: createLocalFalHeaders(falApiKey),
     cache: "no-store",
     credentials: "same-origin",
     signal,
@@ -293,6 +318,45 @@ async function uploadLocalFiles(
 
   if (!response.ok) {
     throw new Error(payload.error ?? "Local upload failed.");
+  }
+
+  return payload;
+}
+
+async function queueLocalGenerationRequest(params: {
+  falApiKey: string;
+  modelId: string;
+  folderId: string | null;
+  draft: PersistedStudioDraft;
+  inputs: LocalStudioGenerateInputDescriptor[];
+  filesByField: Map<string, File>;
+  signal?: AbortSignal;
+}) {
+  const formData = new FormData();
+  formData.set("modelId", params.modelId);
+  formData.set("draft", JSON.stringify(params.draft));
+  formData.set("inputs", JSON.stringify(params.inputs));
+  if (params.folderId) {
+    formData.set("folderId", params.folderId);
+  }
+  for (const [field, file] of params.filesByField.entries()) {
+    formData.set(`input-file:${field}`, file);
+  }
+
+  const response = await fetch("/api/studio/local/generate", {
+    method: "POST",
+    headers: createLocalFalHeaders(params.falApiKey),
+    body: formData,
+    cache: "no-store",
+    credentials: "same-origin",
+    signal: params.signal,
+  });
+  const payload = (await response.json()) as LocalStudioSnapshotResponse & {
+    error?: string;
+  };
+
+  if (!response.ok) {
+    throw new Error(payload.error ?? "Local generation failed.");
   }
 
   return payload;
@@ -524,6 +588,26 @@ async function deleteHostedAccountRequest(signal?: AbortSignal) {
   }
 }
 
+async function submitFeedbackRequest(message: string, signal?: AbortSignal) {
+  const response = await fetch("/api/feedback", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      message,
+    }),
+    cache: "no-store",
+    credentials: "same-origin",
+    signal,
+  });
+  const payload = (await response.json()) as { error?: string; ok?: boolean };
+
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.error ?? "Could not submit feedback.");
+  }
+}
+
 async function validateFalApiKey(falApiKey: string) {
   const response = await fetch("/api/providers/fal/validate", {
     method: "POST",
@@ -622,16 +706,28 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   const [createTextErrorMessage, setCreateTextErrorMessage] = useState<string | null>(
     null
   );
+  const [feedbackDialogOpen, setFeedbackDialogOpen] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState("");
+  const [feedbackSaving, setFeedbackSaving] = useState(false);
+  const [feedbackErrorMessage, setFeedbackErrorMessage] = useState<string | null>(
+    null
+  );
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [uploadDialogFolderId, setUploadDialogFolderId] = useState<string | null>(
     null
   );
   const [uploadAssetsLoading, setUploadAssetsLoading] = useState(false);
+  const [uploadErrorMessage, setUploadErrorMessage] = useState<string | null>(null);
+  const [generationErrorDialogOpen, setGenerationErrorDialogOpen] = useState(false);
+  const [generationErrorMessage, setGenerationErrorMessage] = useState("");
   const [queueLimitDialogOpen, setQueueLimitDialogOpen] = useState(false);
   const [purchaseCreditsPending, setPurchaseCreditsPending] = useState(false);
   const [purchaseCreditsErrorMessage, setPurchaseCreditsErrorMessage] = useState<string | null>(
     null
   );
+  const [modelConfigurationPending, setModelConfigurationPending] = useState(false);
+  const [modelConfigurationErrorMessage, setModelConfigurationErrorMessage] =
+    useState<string | null>(null);
   const [hostedSetupMessage, setHostedSetupMessage] = useState<string | null>(null);
   const [hostedAuthStatus, setHostedAuthStatus] = useState<HostedAuthStatus>(
     appMode === "hosted" ? "checking" : "signed_out"
@@ -641,6 +737,12 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   const [hostedAuthErrorMessage, setHostedAuthErrorMessage] = useState<string | null>(
     null
   );
+  const [accountActionPending, setAccountActionPending] = useState<
+    "delete" | "sign_out" | null
+  >(null);
+  const [accountActionErrorMessage, setAccountActionErrorMessage] = useState<
+    string | null
+  >(null);
   const [hostedSessionUser, setHostedSessionUser] = useState<User | null>(null);
   const normalizedEnabledModelIds = useMemo(
     () => normalizeStudioEnabledModelIds(modelConfiguration.enabledModelIds),
@@ -997,6 +1099,10 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       setCreateTextTitle("");
       setCreateTextBody("");
       setCreateTextErrorMessage(null);
+      setFeedbackDialogOpen(false);
+      setFeedbackMessage("");
+      setFeedbackSaving(false);
+      setFeedbackErrorMessage(null);
       setUploadDialogOpen(false);
       setUploadDialogFolderId(null);
       setQueueLimitDialogOpen(false);
@@ -1075,7 +1181,10 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     setProviderConnectionStatus(nextProviderSettings.falApiKey ? "connected" : "idle");
     const request = beginLocalRequest();
 
-    void fetchLocalBootstrap(request.controller.signal)
+    void fetchLocalBootstrap({
+      falApiKey: nextProviderSettings.falApiKey,
+      signal: request.controller.signal,
+    })
       .then((response) => {
         finishLocalRequest(request.controller);
 
@@ -1141,6 +1250,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
           gallerySizeLevel,
           lastValidatedAt: providerSettings.lastValidatedAt,
         },
+        providerSettings.falApiKey,
         request.controller.signal
       )
         .then((response) => {
@@ -1323,6 +1433,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
 
         void fetchLocalSync({
           sinceRevision: localRevisionRef.current,
+          falApiKey: providerSettings.falApiKey,
           signal: request.controller.signal,
         })
           .then((response) => {
@@ -1356,7 +1467,13 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [appMode, applyLocalResponse, beginLocalRequest, finishLocalRequest]);
+  }, [
+    appMode,
+    applyLocalResponse,
+    beginLocalRequest,
+    finishLocalRequest,
+    providerSettings.falApiKey,
+  ]);
 
   const selectedModel = useMemo(
     () => models.find((model) => model.id === visibleSelectedModelId) ?? models[0],
@@ -1449,6 +1566,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       try {
         const response = await mutateLocalSnapshot(
           mutation,
+          providerSettings.falApiKey,
           request.controller.signal
         );
         applyLocalResponse(response.snapshot, {
@@ -1462,7 +1580,12 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
         finishLocalRequest(request.controller);
       }
     },
-    [applyLocalResponse, beginLocalRequest, finishLocalRequest]
+    [
+      applyLocalResponse,
+      beginLocalRequest,
+      finishLocalRequest,
+      providerSettings.falApiKey,
+    ]
   );
 
   const applyLocalUpload = useCallback(
@@ -1473,6 +1596,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
         const response = await uploadLocalFiles(
           files,
           folderId,
+          providerSettings.falApiKey,
           request.controller.signal
         );
         applyLocalResponse(response.snapshot, {
@@ -1486,7 +1610,12 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
         finishLocalRequest(request.controller);
       }
     },
-    [applyLocalResponse, beginLocalRequest, finishLocalRequest]
+    [
+      applyLocalResponse,
+      beginLocalRequest,
+      finishLocalRequest,
+      providerSettings.falApiKey,
+    ]
   );
 
   const refreshLocalState = useCallback(() => {
@@ -1494,6 +1623,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
 
     void fetchLocalSync({
       sinceRevision: null,
+      falApiKey: providerSettings.falApiKey,
       signal: request.controller.signal,
     })
       .then((response) => {
@@ -1513,7 +1643,12 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       .catch(() => {
         finishLocalRequest(request.controller);
       });
-  }, [applyLocalResponse, beginLocalRequest, finishLocalRequest]);
+  }, [
+    applyLocalResponse,
+    beginLocalRequest,
+    finishLocalRequest,
+    providerSettings.falApiKey,
+  ]);
 
   const applyHostedMutation = useCallback(
     async (mutation: HostedStudioMutation) => {
@@ -1582,6 +1717,11 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       });
   }, [applyHostedResponse, beginHostedRequest, finishHostedRequest]);
 
+  const surfaceGenerationError = useCallback((message: string) => {
+    setGenerationErrorMessage(message);
+    setGenerationErrorDialogOpen(true);
+  }, []);
+
   const hostedAccount = useMemo(() => {
     if (appMode !== "hosted" || !creditBalance) {
       return null;
@@ -1619,6 +1759,15 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
 
     zeroCreditsDialogOpenedRef.current = false;
   }, [appMode, creditBalance, hostedUserSignedIn]);
+
+  useEffect(() => {
+    if (settingsDialogOpen) {
+      return;
+    }
+
+    setAccountActionErrorMessage(null);
+    setModelConfigurationErrorMessage(null);
+  }, [settingsDialogOpen]);
 
   useEffect(() => {
     if (appMode !== "hosted" || !hostedUserSignedIn || typeof window === "undefined") {
@@ -1696,35 +1845,77 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       : "T";
 
   const updateModelConfiguration = useCallback(
-    (enabledModelIds: string[]) => {
+    async (enabledModelIds: string[]) => {
+      if (modelConfigurationPending) {
+        return;
+      }
+
       const nextEnabledModelIds = normalizeStudioEnabledModelIds(enabledModelIds);
       const updatedAt = new Date().toISOString();
+      const previousConfiguration = {
+        enabledModelIds: [...modelConfiguration.enabledModelIds],
+        updatedAt: modelConfiguration.updatedAt,
+      } satisfies StudioModelConfiguration;
+
+      setModelConfigurationErrorMessage(null);
+      setModelConfigurationPending(true);
 
       if (appMode === "hosted") {
         setModelConfiguration({
           enabledModelIds: nextEnabledModelIds,
           updatedAt,
         });
-        void applyHostedMutation({
-          action: "set_enabled_models",
-          enabledModelIds: nextEnabledModelIds,
-        }).catch(refreshHostedState);
-        return;
+        try {
+          await applyHostedMutation({
+            action: "set_enabled_models",
+            enabledModelIds: nextEnabledModelIds,
+          });
+          return;
+        } catch (error) {
+          if (!isAbortRequestError(error)) {
+            setModelConfiguration(previousConfiguration);
+            setModelConfigurationErrorMessage(
+              error instanceof Error
+                ? error.message
+                : "Could not update model configuration."
+            );
+            refreshHostedState();
+          }
+          return;
+        } finally {
+          setModelConfigurationPending(false);
+        }
       }
 
       setModelConfiguration({
         enabledModelIds: nextEnabledModelIds,
         updatedAt,
       });
-      void applyLocalMutation({
-        action: "set_enabled_models",
-        enabledModelIds: nextEnabledModelIds,
-      }).catch(refreshLocalState);
+      try {
+        await applyLocalMutation({
+          action: "set_enabled_models",
+          enabledModelIds: nextEnabledModelIds,
+        });
+      } catch (error) {
+        if (!isAbortRequestError(error)) {
+          setModelConfiguration(previousConfiguration);
+          setModelConfigurationErrorMessage(
+            error instanceof Error
+              ? error.message
+              : "Could not update model configuration."
+          );
+          refreshLocalState();
+        }
+      } finally {
+        setModelConfigurationPending(false);
+      }
     },
     [
       appMode,
       applyLocalMutation,
       applyHostedMutation,
+      modelConfiguration,
+      modelConfigurationPending,
       refreshLocalState,
       refreshHostedState,
     ]
@@ -1732,6 +1923,10 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
 
   const toggleModelEnabled = useCallback(
     (modelId: string) => {
+      if (modelConfigurationPending) {
+        return;
+      }
+
       updateModelConfiguration(
         toggleStudioModelEnabled({
           enabledModelIds: normalizedEnabledModelIds,
@@ -1739,7 +1934,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
         })
       );
     },
-    [normalizedEnabledModelIds, updateModelConfiguration]
+    [modelConfigurationPending, normalizedEnabledModelIds, updateModelConfiguration]
   );
 
   const clearSelection = useCallback(() => {
@@ -2551,11 +2746,64 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     selectedFolderId,
   ]);
 
+  const openFeedbackDialog = useCallback(() => {
+    if (feedbackSaving) {
+      return;
+    }
+
+    setFeedbackErrorMessage(null);
+    setFeedbackDialogOpen(true);
+  }, [feedbackSaving]);
+
+  const closeFeedbackDialog = useCallback(() => {
+    if (feedbackSaving) {
+      return;
+    }
+
+    setFeedbackDialogOpen(false);
+    setFeedbackMessage("");
+    setFeedbackErrorMessage(null);
+  }, [feedbackSaving]);
+
+  const updateFeedbackMessage = useCallback((value: string) => {
+    setFeedbackMessage(value);
+    setFeedbackErrorMessage(null);
+  }, []);
+
+  const submitFeedback = useCallback(async () => {
+    if (feedbackSaving) {
+      return;
+    }
+
+    const trimmedMessage = feedbackMessage.trim();
+    if (!trimmedMessage) {
+      setFeedbackErrorMessage("Feedback message is required.");
+      return;
+    }
+
+    setFeedbackSaving(true);
+    setFeedbackErrorMessage(null);
+
+    try {
+      await submitFeedbackRequest(trimmedMessage);
+      setFeedbackDialogOpen(false);
+      setFeedbackMessage("");
+      setFeedbackErrorMessage(null);
+    } catch (error) {
+      setFeedbackErrorMessage(
+        error instanceof Error ? error.message : "Could not submit feedback."
+      );
+    } finally {
+      setFeedbackSaving(false);
+    }
+  }, [feedbackMessage, feedbackSaving]);
+
   const openUploadDialog = useCallback(() => {
     if (uploadAssetsLoading) {
       return;
     }
 
+    setUploadErrorMessage(null);
     setUploadDialogFolderId(selectedFolderId);
     setUploadDialogOpen(true);
   }, [selectedFolderId, uploadAssetsLoading]);
@@ -2565,6 +2813,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       return;
     }
 
+    setUploadErrorMessage(null);
     setUploadDialogOpen(false);
   }, [uploadAssetsLoading]);
 
@@ -2579,6 +2828,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       }
 
       setUploadAssetsLoading(true);
+      setUploadErrorMessage(null);
       try {
         if (appMode === "hosted") {
           await applyHostedUpload(files, folderIdOverride ?? selectedFolderId);
@@ -2588,6 +2838,14 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
 
         await applyLocalUpload(files, folderIdOverride ?? selectedFolderId);
         setUploadDialogOpen(false);
+      } catch (error) {
+        if (isAbortRequestError(error)) {
+          return;
+        }
+
+        setUploadErrorMessage(
+          error instanceof Error ? error.message : "Could not upload those files."
+        );
       } finally {
         setUploadAssetsLoading(false);
       }
@@ -2767,30 +3025,51 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   }, [currentDraft.endFrame, currentDraft.references, currentDraft.startFrame]);
 
   const signOutHostedAccount = useCallback(async () => {
-    if (appMode !== "hosted") {
+    if (appMode !== "hosted" || accountActionPending !== null) {
       return;
     }
 
-    await signOutHostedSession();
-    setSettingsDialogOpen(false);
-  }, [appMode]);
+    setAccountActionErrorMessage(null);
+    setAccountActionPending("sign_out");
+
+    try {
+      await signOutHostedSession();
+      setSettingsDialogOpen(false);
+    } catch (error) {
+      if (!isAbortRequestError(error)) {
+        setAccountActionErrorMessage(
+          error instanceof Error ? error.message : "Could not sign out right now."
+        );
+      }
+    } finally {
+      setAccountActionPending(null);
+    }
+  }, [accountActionPending, appMode]);
 
   const deleteHostedAccount = useCallback(async () => {
-    if (appMode !== "hosted") {
+    if (appMode !== "hosted" || accountActionPending !== null) {
       return;
     }
 
+    setAccountActionErrorMessage(null);
+    setAccountActionPending("delete");
     const request = beginHostedRequest();
 
     try {
       await deleteHostedAccountRequest(request.controller.signal);
       await signOutHostedSession().catch(() => undefined);
+      setSettingsDialogOpen(false);
+    } catch (error) {
+      if (!isAbortRequestError(error)) {
+        setAccountActionErrorMessage(
+          error instanceof Error ? error.message : "Could not delete your account."
+        );
+      }
     } finally {
       finishHostedRequest(request.controller);
+      setAccountActionPending(null);
     }
-
-    setSettingsDialogOpen(false);
-  }, [appMode, beginHostedRequest, finishHostedRequest]);
+  }, [accountActionPending, appMode, beginHostedRequest, finishHostedRequest]);
 
   const setGallerySizeLevel = useCallback((value: number) => {
     const nextValue = Math.min(Math.max(Math.round(value), 0), 6);
@@ -2801,7 +3080,15 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     setSelectedModelIdState(getVisibleModelId(modelId));
   }, [getVisibleModelId]);
 
+  const closeGenerationErrorDialog = useCallback(() => {
+    setGenerationErrorDialogOpen(false);
+    setGenerationErrorMessage("");
+  }, []);
+
   const generate = useCallback(() => {
+    setGenerationErrorDialogOpen(false);
+    setGenerationErrorMessage("");
+
     if (!canGenerateWithDraft(selectedModel, currentDraft)) {
       return;
     }
@@ -2837,50 +3124,103 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
         })
         .catch((error) => {
           finishHostedRequest(request.controller);
+          if (isAbortRequestError(error)) {
+            return;
+          }
+
           if (
             error instanceof Error &&
             error.message ===
               "limit of 100 concurrent queues/ generations reached, please wait for your generations to finish before continuing."
           ) {
             setQueueLimitDialogOpen(true);
+            return;
           }
+
+          if (error instanceof Error) {
+            if (
+              error.message === "Sign in with Google to use hosted mode." ||
+              error.message === "Your hosted session expired. Sign in with Google again."
+            ) {
+              setHostedAuthDialogOpen(true);
+            }
+            if (error.message === "Not enough credits to queue this generation.") {
+              setSettingsDialogOpen(true);
+            }
+            surfaceGenerationError(error.message);
+            return;
+          }
+
+          surfaceGenerationError("Hosted generation could not be queued.");
         });
       return;
     }
 
-    void applyLocalMutation({
-      action: "generate",
+    const localGenerationPayload = buildHostedGenerationPayload();
+    const request = beginLocalRequest();
+
+    void queueLocalGenerationRequest({
+      falApiKey: providerSettings.falApiKey,
       modelId: selectedModel.id,
       folderId: selectedFolderId,
       draft: createDraftSnapshot(currentDraft),
-      referenceCount: currentDraft.references.length,
-      startFrameCount: currentDraft.startFrame ? 1 : 0,
-      endFrameCount: currentDraft.endFrame ? 1 : 0,
-    }).catch((error) => {
-      if (
-        error instanceof Error &&
-        error.message ===
-          "limit of 100 concurrent queues/ generations reached, please wait for your generations to finish before continuing."
-      ) {
-        setQueueLimitDialogOpen(true);
-        return;
-      }
+      inputs: localGenerationPayload.inputs as LocalStudioGenerateInputDescriptor[],
+      filesByField: localGenerationPayload.filesByField,
+      signal: request.controller.signal,
+    })
+      .then((response) => {
+        finishLocalRequest(request.controller);
+        applyLocalResponse(response.snapshot, {
+          preserveDrafts: true,
+          requestId: request.requestId,
+          revision: response.revision,
+          sessionId: request.sessionId,
+        });
+      })
+      .catch((error) => {
+        finishLocalRequest(request.controller);
+        if (isAbortRequestError(error)) {
+          return;
+        }
 
-      refreshLocalState();
-    });
+        if (
+          error instanceof Error &&
+          error.message ===
+            "limit of 100 concurrent queues/ generations reached, please wait for your generations to finish before continuing."
+        ) {
+          setQueueLimitDialogOpen(true);
+          return;
+        }
+
+        if (
+          error instanceof Error &&
+          error.message.toLowerCase().includes("fal api key")
+        ) {
+          setSettingsDialogOpen(true);
+        }
+
+        surfaceGenerationError(
+          error instanceof Error ? error.message : "Local generation failed."
+        );
+        refreshLocalState();
+      });
   }, [
     appMode,
-    applyLocalMutation,
+    applyLocalResponse,
     applyHostedResponse,
     beginHostedRequest,
+    beginLocalRequest,
     buildHostedGenerationPayload,
     currentDraft,
+    finishLocalRequest,
     finishHostedRequest,
     hasFalKey,
     hostedUserSignedIn,
+    providerSettings.falApiKey,
     refreshLocalState,
     selectedFolderId,
     selectedModel,
+    surfaceGenerationError,
   ]);
 
   return {
@@ -2888,8 +3228,10 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     addReferences,
     cancelRun,
     clearSelection,
+    closeFeedbackDialog,
     closeCreateTextComposer,
     closeFolderEditor,
+    closeGenerationErrorDialog,
     closeQueueLimitDialog: () => setQueueLimitDialogOpen(false),
     closeUploadDialog,
     createTextAsset,
@@ -2899,9 +3241,15 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     createTextSaving,
     createTextTitle,
     currentDraft,
+    accountActionErrorMessage,
+    accountActionPending,
     deleteFolder,
     deleteItem,
     deleteSelectedItems,
+    feedbackDialogOpen,
+    feedbackErrorMessage,
+    feedbackMessage,
+    feedbackSaving,
     dropLibraryItemsIntoPromptBar,
     folderCounts,
     folderEditorError,
@@ -2912,6 +3260,8 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     folders,
     gallerySizeLevel,
     generate,
+    generationErrorDialogOpen,
+    generationErrorMessage,
     getItemsForFolder: (folderId: string) =>
       items.filter((item) => item.folderId === folderId),
     getPromptBarDropHint,
@@ -2923,11 +3273,14 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     hostedUserSignedIn,
     items,
     modelConfiguration,
+    modelConfigurationErrorMessage,
+    modelConfigurationPending,
     modelSections: STUDIO_MODEL_SECTIONS,
     models,
     moveItemsToFolder,
     openCreateFolder,
     openCreateTextComposer,
+    openFeedbackDialog,
     openRenameFolder,
     openUploadDialog,
     providerConnectionStatus,
@@ -2971,15 +3324,18 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     toggleSelectionMode,
     ungroupedItems,
     ungroupedRunCards,
+    submitFeedback,
     updateCreateTextBody,
     updateCreateTextTitle,
     updateDraft,
+    updateFeedbackMessage,
     updateFolderEditorValue,
     updateModelConfiguration,
     updateTextItem,
     uploadAssetsLoading,
     uploadDialogFolderId,
     uploadDialogOpen,
+    uploadErrorMessage,
     uploadFiles,
     deleteHostedAccount,
     signOutHostedAccount,
