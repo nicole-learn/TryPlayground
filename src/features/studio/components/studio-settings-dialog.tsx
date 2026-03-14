@@ -433,6 +433,7 @@ function AccountInformationTab({
           type="button"
           onClick={() => setConfirmingDelete(true)}
           disabled={pendingAction !== null}
+          hidden={confirmingDelete}
           className="rounded-full border border-red-500/28 px-5 py-2.5 text-sm font-medium text-red-200 transition hover:bg-red-500/10 disabled:opacity-60"
         >
           Delete Account
