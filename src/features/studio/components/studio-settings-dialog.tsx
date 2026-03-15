@@ -9,14 +9,17 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/cn";
-import { STUDIO_MODEL_CATALOG_ALPHABETICAL } from "../studio-model-catalog";
 import type { StudioAppMode } from "../studio-app-mode";
+import {
+  isStudioModelConfigurationEntryEnabled,
+  STUDIO_MODEL_CONFIGURATION_ENTRIES,
+} from "../studio-model-configuration";
 import { ModalShell } from "./modal-shell";
 import type {
   StudioCreditPurchaseAmount,
   StudioHostedAccount,
   StudioModelConfiguration,
-  StudioProviderConnectionStatus,
+  StudioProviderKeyId,
   StudioProviderSaveResult,
   StudioProviderSettings,
 } from "../types";
@@ -34,9 +37,9 @@ interface StudioSettingsDialogProps {
   modelConfiguration: StudioModelConfiguration;
   open: boolean;
   purchaseErrorMessage: string | null;
-  providerConnectionStatus: StudioProviderConnectionStatus;
   providerSettings: StudioProviderSettings;
   purchasePending: boolean;
+  highlightedProviderKey: StudioProviderKeyId | null;
   onClose: () => void;
   onDeleteAccount: () => Promise<void> | void;
   onPurchaseCredits: (credits: StudioCreditPurchaseAmount) => Promise<void> | void;
@@ -78,20 +81,61 @@ function SettingsTabButton({
 
 function ApiKeyTab({
   initialValues,
-  providerConnectionStatus,
+  highlightedProviderKey,
   onSave,
 }: {
   initialValues: StudioProviderSettings;
-  providerConnectionStatus: StudioProviderConnectionStatus;
+  highlightedProviderKey: StudioProviderKeyId | null;
   onSave: (
     settings: StudioProviderSettings
   ) => Promise<StudioProviderSaveResult> | StudioProviderSaveResult;
 }) {
   const [falApiKey, setFalApiKey] = useState(initialValues.falApiKey);
-  const [revealKey, setRevealKey] = useState(false);
+  const [openaiApiKey, setOpenaiApiKey] = useState(initialValues.openaiApiKey);
+  const [anthropicApiKey, setAnthropicApiKey] = useState(initialValues.anthropicApiKey);
+  const [geminiApiKey, setGeminiApiKey] = useState(initialValues.geminiApiKey);
+  const [revealedKeyId, setRevealedKeyId] = useState<StudioProviderKeyId | null>(null);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const providerFields = [
+    {
+      id: "fal" as const,
+      label: "Fal API Key",
+      description: "Required for images, video, TTS, and background removal in local mode.",
+      placeholder: "Paste your Fal API key",
+      value: falApiKey ?? "",
+      lastValidatedAt: initialValues.falLastValidatedAt,
+      setValue: setFalApiKey,
+    },
+    {
+      id: "openai" as const,
+      label: "OpenAI API Key",
+      description: "Required for ChatGPT models in local mode.",
+      placeholder: "Paste your OpenAI API key",
+      value: openaiApiKey ?? "",
+      lastValidatedAt: initialValues.openaiLastValidatedAt,
+      setValue: setOpenaiApiKey,
+    },
+    {
+      id: "anthropic" as const,
+      label: "Claude API Key",
+      description: "Required for Claude models in local mode.",
+      placeholder: "Paste your Claude API key",
+      value: anthropicApiKey ?? "",
+      lastValidatedAt: initialValues.anthropicLastValidatedAt,
+      setValue: setAnthropicApiKey,
+    },
+    {
+      id: "gemini" as const,
+      label: "Gemini API Key",
+      description: "Required for Gemini models in local mode.",
+      placeholder: "Paste your Gemini API key",
+      value: geminiApiKey ?? "",
+      lastValidatedAt: initialValues.geminiLastValidatedAt,
+      setValue: setGeminiApiKey,
+    },
+  ];
 
   return (
     <form
@@ -104,101 +148,130 @@ function ApiKeyTab({
 
         const result = await onSave({
           falApiKey,
-          lastValidatedAt: initialValues.lastValidatedAt,
+          falLastValidatedAt: initialValues.falLastValidatedAt,
+          openaiApiKey,
+          openaiLastValidatedAt: initialValues.openaiLastValidatedAt,
+          anthropicApiKey,
+          anthropicLastValidatedAt: initialValues.anthropicLastValidatedAt,
+          geminiApiKey,
+          geminiLastValidatedAt: initialValues.geminiLastValidatedAt,
         });
 
         setSaving(false);
 
         if (!result.ok) {
-          setErrorMessage(result.errorMessage ?? "Could not save your Fal API key.");
+          setErrorMessage(result.errorMessage ?? "Could not save your API keys.");
           return;
         }
 
         setSuccessMessage(
-          result.successMessage ?? "Fal API key connected for this browser session."
+          result.successMessage ?? "API keys connected for this browser session."
         );
       }}
     >
-      <div className="rounded-[28px] border border-white/8 bg-white/[0.03] p-5">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-sm font-medium text-white">Fal API Key</div>
-            <div className="mt-1 text-sm text-white/56">
-              Connect your Fal key for local generation.
-            </div>
-          </div>
-          <div
-            className={cn(
-              "rounded-full px-3 py-1 text-xs font-medium",
-              providerConnectionStatus === "connected"
-                ? "bg-primary/15 text-primary"
-                : providerConnectionStatus === "invalid"
-                  ? "bg-red-500/12 text-red-200"
-                  : "bg-white/[0.05] text-white/50"
-            )}
-          >
-            {providerConnectionStatus === "connected"
+      <div className="grid gap-4 lg:grid-cols-2">
+        {providerFields.map((field) => {
+          const status = field.value.trim()
+            ? field.lastValidatedAt
               ? "Connected"
-              : providerConnectionStatus === "invalid"
-                ? "Invalid"
-                : "Not Connected"}
-          </div>
-        </div>
+              : "Saved"
+            : "Not Connected";
+          const highlighted = highlightedProviderKey === field.id;
+          const revealed = revealedKeyId === field.id;
 
-        <div className="mt-4 flex items-center overflow-hidden rounded-2xl border border-white/10 bg-black/25 transition focus-within:border-primary/45">
-          <input
-            name="falApiKey"
-            type={revealKey ? "text" : "password"}
-            value={falApiKey}
-            onChange={(event) => {
-              setFalApiKey(event.target.value);
-              setErrorMessage(null);
-              setSuccessMessage(null);
-            }}
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="off"
-            spellCheck={false}
-            placeholder="Paste your Fal API key"
-            className="h-14 min-w-0 flex-1 bg-transparent px-4 text-sm text-white outline-none"
-          />
-          <button
-            type="button"
-            onClick={() => setRevealKey((current) => !current)}
-            className="mr-2 inline-flex size-10 items-center justify-center rounded-full text-white/56 transition hover:bg-white/5 hover:text-white"
-            aria-label={revealKey ? "Hide API key" : "Show API key"}
-          >
-            {revealKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-          </button>
-        </div>
+          return (
+            <div
+              key={field.id}
+              className={cn(
+                "rounded-[28px] border bg-white/[0.03] p-5 transition",
+                highlighted
+                  ? "border-primary/45 shadow-[0_0_0_1px_color-mix(in_oklch,var(--primary)_55%,transparent),0_18px_42px_rgba(0,0,0,0.24)]"
+                  : "border-white/8"
+              )}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium text-white">{field.label}</div>
+                  <div className="mt-1 text-sm text-white/56">{field.description}</div>
+                </div>
+                <div
+                  className={cn(
+                    "rounded-full px-3 py-1 text-xs font-medium",
+                    field.value.trim()
+                      ? "bg-primary/15 text-primary"
+                      : "bg-white/[0.05] text-white/50"
+                  )}
+                >
+                  {status}
+                </div>
+              </div>
 
-        <div className="mt-4 rounded-2xl border border-white/8 bg-white/[0.025] px-4 py-3 text-sm leading-6 text-white/62">
-          For now, TryPlayground only supports Fal AI API keys and models, and
-          stores your key only for the current browser session instead of saving it
-          permanently. I hope to be able to add other providers and models soon -
-          Nicole
+              <div
+                className={cn(
+                  "mt-4 flex items-center overflow-hidden rounded-2xl border bg-black/25 transition focus-within:border-primary/45",
+                  highlighted ? "border-primary/38" : "border-white/10"
+                )}
+              >
+                <input
+                  name={`${field.id}ApiKey`}
+                  type={revealed ? "text" : "password"}
+                  value={field.value}
+                  onChange={(event) => {
+                    field.setValue(event.target.value);
+                    setErrorMessage(null);
+                    setSuccessMessage(null);
+                  }}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  placeholder={field.placeholder}
+                  className="h-14 min-w-0 flex-1 bg-transparent px-4 text-sm text-white outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    setRevealedKeyId((current) => (current === field.id ? null : field.id))
+                  }
+                  className="mr-2 inline-flex size-10 items-center justify-center rounded-full text-white/56 transition hover:bg-white/5 hover:text-white"
+                  aria-label={revealed ? "Hide API key" : "Show API key"}
+                >
+                  {revealed ? (
+                    <EyeOff className="size-4" />
+                  ) : (
+                    <Eye className="size-4" />
+                  )}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+
+        <div className="rounded-[28px] border border-white/8 bg-white/[0.025] px-5 py-4 text-sm leading-6 text-white/62 lg:col-span-2">
+          Local mode stores these keys only for the current browser session. Hosted
+          mode uses TryPlayground&apos;s server-managed provider keys.
         </div>
 
         {errorMessage ? (
-          <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-100/90">
+          <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-100/90 lg:col-span-2">
             {errorMessage}
           </div>
         ) : null}
 
         {successMessage ? (
-          <div className="mt-4 rounded-2xl border border-primary/20 bg-primary/10 px-4 py-3 text-sm text-primary-foreground">
+          <div className="rounded-2xl border border-primary/20 bg-primary/10 px-4 py-3 text-sm text-primary-foreground lg:col-span-2">
             {successMessage}
           </div>
         ) : null}
 
-        <div className="mt-5 flex justify-end">
+        <div className="flex justify-end lg:col-span-2">
           <button
             type="submit"
             disabled={saving}
             className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition hover:brightness-110 disabled:opacity-60"
           >
             {saving ? <Loader2 className="size-4 animate-spin" /> : null}
-            <span>{saving ? "Checking..." : "Save API Key"}</span>
+            <span>{saving ? "Checking..." : "Save API Keys"}</span>
           </button>
         </div>
       </div>
@@ -218,21 +291,22 @@ function ModelConfigurationTab({
   onToggleModelEnabled: (modelId: string) => void;
 }) {
   const [searchValue, setSearchValue] = useState("");
-  const enabledIdSet = useMemo(
-    () => new Set(modelConfiguration.enabledModelIds),
-    [modelConfiguration.enabledModelIds]
-  );
-  const enabledCount = modelConfiguration.enabledModelIds.length;
-  const filteredModels = useMemo(() => {
+  const filteredEntries = useMemo(() => {
     const query = searchValue.trim().toLowerCase();
     if (!query) {
-      return STUDIO_MODEL_CATALOG_ALPHABETICAL;
+      return STUDIO_MODEL_CONFIGURATION_ENTRIES;
     }
 
-    return STUDIO_MODEL_CATALOG_ALPHABETICAL.filter((model) =>
-      model.name.toLowerCase().includes(query)
+    return STUDIO_MODEL_CONFIGURATION_ENTRIES.filter((entry) =>
+      entry.label.toLowerCase().includes(query)
     );
   }, [searchValue]);
+  const enabledEntryCount = STUDIO_MODEL_CONFIGURATION_ENTRIES.filter((entry) =>
+    isStudioModelConfigurationEntryEnabled({
+      entryId: entry.id,
+      enabledModelIds: modelConfiguration.enabledModelIds,
+    })
+  ).length;
 
   return (
     <div className="space-y-5">
@@ -248,16 +322,19 @@ function ModelConfigurationTab({
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {filteredModels.map((model) => {
-          const enabled = enabledIdSet.has(model.id);
-          const isLastEnabled = enabled && enabledCount === 1;
+        {filteredEntries.map((entry) => {
+          const enabled = isStudioModelConfigurationEntryEnabled({
+            entryId: entry.id,
+            enabledModelIds: modelConfiguration.enabledModelIds,
+          });
+          const isLastEnabled = enabled && enabledEntryCount === 1;
 
           return (
             <button
-              key={model.id}
+              key={entry.id}
               type="button"
               disabled={isLastEnabled || pending}
-              onClick={() => onToggleModelEnabled(model.id)}
+              onClick={() => onToggleModelEnabled(entry.id)}
               className={cn(
                 "rounded-2xl border px-4 py-3 text-left text-sm font-medium transition",
                 enabled
@@ -266,7 +343,7 @@ function ModelConfigurationTab({
                 isLastEnabled || pending ? "cursor-not-allowed opacity-60" : ""
               )}
             >
-              {model.name}
+              {entry.label}
             </button>
           );
         })}
@@ -453,9 +530,9 @@ export function StudioSettingsDialog({
   modelConfiguration,
   open,
   purchaseErrorMessage,
-  providerConnectionStatus,
   providerSettings,
   purchasePending,
+  highlightedProviderKey,
   onClose,
   onDeleteAccount,
   onPurchaseCredits,
@@ -495,12 +572,12 @@ export function StudioSettingsDialog({
                     />
                     <SettingsTabButton
                       active={currentTab === "models"}
-                      label="Model Configurations"
+                      label="Models"
                       onClick={() => setHostedTab("models")}
                     />
                     <SettingsTabButton
                       active={currentTab === "account"}
-                      label="Account Information"
+                      label="Account"
                       onClick={() => setHostedTab("account")}
                     />
                   </>
@@ -513,7 +590,7 @@ export function StudioSettingsDialog({
                     />
                     <SettingsTabButton
                       active={currentTab === "models"}
-                      label="Model Configuration"
+                      label="Models"
                       onClick={() => setLocalTab("models")}
                     />
                   </>
@@ -559,9 +636,19 @@ export function StudioSettingsDialog({
             ) : null
           ) : localTab === "api-key" ? (
             <ApiKeyTab
-              key={`${providerSettings.falApiKey}:${providerSettings.lastValidatedAt ?? "none"}`}
+              key={JSON.stringify({
+                fal: providerSettings.falApiKey,
+                falAt: providerSettings.falLastValidatedAt,
+                openai: providerSettings.openaiApiKey,
+                openaiAt: providerSettings.openaiLastValidatedAt,
+                anthropic: providerSettings.anthropicApiKey,
+                anthropicAt: providerSettings.anthropicLastValidatedAt,
+                gemini: providerSettings.geminiApiKey,
+                geminiAt: providerSettings.geminiLastValidatedAt,
+                highlightedProviderKey,
+              })}
               initialValues={providerSettings}
-              providerConnectionStatus={providerConnectionStatus}
+              highlightedProviderKey={highlightedProviderKey}
               onSave={onSaveProviderSettings}
             />
           ) : (

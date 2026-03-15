@@ -12,6 +12,7 @@ import {
 import { cn } from "@/lib/cn";
 import { readDraggedLibraryItems } from "../studio-drag-data";
 import { canGenerateWithDraft } from "../studio-generation-rules";
+import { quoteStudioDraftPricing } from "../studio-model-pricing";
 import type {
   DraftReference,
   StudioDraft,
@@ -22,6 +23,7 @@ import {
   ControlPillConfig,
   ModelSelectPill,
   SettingPillButton,
+  controlPillTriggerClassName,
 } from "./floating-control-bar/control-pills";
 import {
   DragHintToast,
@@ -50,6 +52,8 @@ interface FloatingControlBarProps {
   onDropLibraryItems: (itemIds: string[]) => Promise<string | null> | string | null;
   onGenerate: () => void;
   onRemoveReference: (referenceId: string) => void;
+  onSavePrompt: () => void;
+  savePromptPending?: boolean;
   onClearStartFrame: () => void;
   onClearEndFrame: () => void;
   onSelectModel: (modelId: string) => void;
@@ -72,6 +76,8 @@ export function FloatingControlBar({
   onDropLibraryItems,
   onGenerate,
   onRemoveReference,
+  onSavePrompt,
+  savePromptPending = false,
   onClearStartFrame,
   onClearEndFrame,
   onSelectModel,
@@ -94,6 +100,11 @@ export function FloatingControlBar({
   const dropErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const canGenerate = canGenerateWithDraft(model, draft);
+  const canSavePrompt = draft.prompt.trim().length > 0 && !savePromptPending;
+  const quotedCredits = useMemo(
+    () => quoteStudioDraftPricing(model, draft).billedCredits,
+    [draft, model]
+  );
   const maxReferenceFiles = model.maxReferenceFiles ?? 6;
   const supportsFrameInputs = model.kind === "video" && model.supportsFrameInputs;
   const showFrameControls = supportsFrameInputs && draft.videoInputMode === "frames";
@@ -322,6 +333,10 @@ export function FloatingControlBar({
   );
 
   const settingPills = useMemo<ControlPillConfig[]>(() => {
+    if (model.kind === "text") {
+      return [];
+    }
+
     const pills: ControlPillConfig[] = [];
 
     if (model.aspectRatioOptions) {
@@ -511,7 +526,14 @@ export function FloatingControlBar({
                 <DragHintToast message={dragHint} />
               ) : null}
 
-              <div className="flex items-stretch">
+              <div
+                className={cn(
+                  "flex items-stretch",
+                  showFrameControls
+                    ? "flex-col"
+                    : "flex-col min-[1320px]:flex-row"
+                )}
+              >
                 <div className="flex min-w-0 flex-1 flex-col">
                   {hasReferences ? (
                     <div className="flex items-center gap-2 px-4 pb-1 pt-3">
@@ -563,19 +585,36 @@ export function FloatingControlBar({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-1.5 px-4 pb-3">
-                    <ModelSelectPill
-                      models={models}
-                      sections={sections}
-                      selectedModelId={selectedModelId}
-                      onSelectModel={onSelectModel}
-                    />
-                    {settingPills.map((pill) => (
-                      <SettingPillButton key={pill.id} pill={pill} />
-                    ))}
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                      <ModelSelectPill
+                        models={models}
+                        sections={sections}
+                        selectedModelId={selectedModelId}
+                        onSelectModel={onSelectModel}
+                      />
+                      {settingPills.map((pill) => (
+                        <SettingPillButton key={pill.id} pill={pill} />
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={onSavePrompt}
+                      disabled={!canSavePrompt}
+                      className={cn(controlPillTriggerClassName(), "ml-auto")}
+                    >
+                      {savePromptPending ? "Saving..." : "Save Prompt"}
+                    </button>
                   </div>
                 </div>
 
-                <div className="flex shrink-0 items-end gap-2 p-3">
+                <div
+                  className={cn(
+                    "flex shrink-0 items-end justify-end gap-2 px-3 pb-3",
+                    showFrameControls
+                      ? "border-t border-white/[0.08] pt-3"
+                      : "border-t border-white/[0.08] pt-3 min-[1320px]:border-t-0 min-[1320px]:p-3 min-[1320px]:pt-0"
+                  )}
+                >
                   {showFrameControls ? (
                     <div className="flex items-stretch gap-1.5">
                       <FrameSlot
@@ -610,7 +649,7 @@ export function FloatingControlBar({
                     }}
                     className="flex h-[70px] items-center gap-2 rounded-xl px-5 text-base font-semibold tracking-tight text-primary-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_10px_26px_color-mix(in_oklch,var(--primary)_18%,transparent)] transition-[filter,opacity] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:brightness-100"
                   >
-                    <span>Generate</span>
+                    <span>{`Generate • ${quotedCredits.toFixed(1)} credits`}</span>
                     <Sparkles className="size-4" />
                   </button>
                 </div>

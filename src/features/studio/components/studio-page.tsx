@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AssetDetailDialog } from "./asset-detail-dialog";
 import { CreateTextDialog } from "./create-text-dialog";
-import { FeedbackDialog } from "./feedback-dialog";
 import { FloatingControlBar } from "./floating-control-bar";
 import { FolderDeleteDialog } from "./folder-delete-dialog";
 import { FolderDialog } from "./folder-dialog";
@@ -12,6 +11,7 @@ import { HostedAuthDialog } from "./hosted-auth-dialog";
 import { QueueLimitDialog } from "./queue-limit-dialog";
 import { StudioDevModeOverlay } from "./studio-dev-mode-overlay";
 import { StudioDragPreviewOverlay } from "./studio-drag-preview-overlay";
+import { StudioFeedbackDialog } from "./studio-feedback-dialog";
 import { StudioGallery } from "./studio-gallery";
 import { StudioMobileRail } from "./studio-mobile-rail";
 import { StudioMessageDialog } from "./studio-message-dialog";
@@ -248,6 +248,7 @@ export function StudioPage({
       onMoveDraggedItems={(itemIds) => studio.moveItemsToFolder(itemIds, null)}
       onOpenItem={setActiveItemId}
       onCancelRun={studio.cancelRun}
+      onDeleteRun={studio.deleteRun}
       onDownloadItem={(itemId) => {
         const item = studio.items.find((entry) => entry.id === itemId);
         if (!item) {
@@ -287,6 +288,7 @@ export function StudioPage({
       }
       onOpenItem={setActiveItemId}
       onCancelRun={studio.cancelRun}
+      onDeleteRun={studio.deleteRun}
       onDownloadItem={(itemId) => {
         const item = studio.items.find((entry) => entry.id === itemId);
         if (!item) {
@@ -325,6 +327,8 @@ export function StudioPage({
             onDropLibraryItemsToStartFrame={studio.dropLibraryItemsIntoStartFrame}
             onGenerate={studio.generate}
             onRemoveReference={studio.removeReference}
+            onSavePrompt={studio.saveCurrentPromptAsTextItem}
+            savePromptPending={studio.savePromptPending}
             onSelectModel={studio.setSelectedModelId}
             onSetEndFrame={studio.setEndFrame}
             onSetStartFrame={studio.setStartFrame}
@@ -385,7 +389,6 @@ export function StudioPage({
             onClearSelection={studio.clearSelection}
             onDeleteSelected={studio.deleteSelectedItems}
             onDownloadSelected={downloadSelectedItems}
-            onOpenCreateText={studio.openCreateTextComposer}
             onOpenAccount={openAccountSurface}
             onOpenFeedback={studio.openFeedbackDialog}
             onOpenUpload={studio.openUploadDialog}
@@ -410,21 +413,12 @@ export function StudioPage({
         errorMessage={studio.hostedAuthErrorMessage}
         open={studio.hostedAuthDialogOpen}
         pending={studio.hostedAuthPending}
+        onClose={studio.closeHostedAuthDialog}
         onContinue={studio.signInWithGoogleHostedAccount}
       />
 
-      <FeedbackDialog
-        errorMessage={studio.feedbackErrorMessage}
-        message={studio.feedbackMessage}
-        open={studio.feedbackDialogOpen}
-        pending={studio.feedbackSaving}
-        onClose={studio.closeFeedbackDialog}
-        onMessageChange={studio.updateFeedbackMessage}
-        onSubmit={studio.submitFeedback}
-      />
-
       <StudioSettingsDialog
-        key={`${appMode}:${studio.settingsDialogOpen ? "open" : "closed"}`}
+        key={`${appMode}:${studio.settingsDialogOpen ? "open" : "closed"}:${studio.highlightedProviderKey ?? "none"}`}
         appMode={appMode}
         accountActionErrorMessage={studio.accountActionErrorMessage}
         accountActionPending={studio.accountActionPending}
@@ -434,7 +428,7 @@ export function StudioPage({
         modelConfiguration={studio.modelConfiguration}
         open={studio.settingsDialogOpen}
         purchaseErrorMessage={studio.purchaseCreditsErrorMessage}
-        providerConnectionStatus={studio.providerConnectionStatus}
+        highlightedProviderKey={studio.highlightedProviderKey}
         providerSettings={studio.providerSettings}
         purchasePending={studio.purchaseCreditsPending}
         onClose={() => studio.setSettingsDialogOpen(false)}
@@ -521,6 +515,17 @@ export function StudioPage({
         title="Generation Error"
         message={studio.generationErrorMessage}
         onClose={studio.closeGenerationErrorDialog}
+      />
+
+      <StudioFeedbackDialog
+        errorMessage={studio.feedbackErrorMessage}
+        message={studio.feedbackMessage}
+        open={studio.feedbackDialogOpen}
+        pending={studio.feedbackPending}
+        successMessage={studio.feedbackSuccessMessage}
+        onClose={studio.closeFeedbackDialog}
+        onMessageChange={studio.updateFeedbackMessage}
+        onSubmit={studio.submitFeedback}
       />
     </>
   );

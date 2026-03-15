@@ -11,9 +11,16 @@ describe("studio-model-configuration", () => {
   it("returns the curated default enabled model ids", () => {
     expect(createDefaultStudioEnabledModelIds()).toEqual([
       "nano-banana-2",
-      "gemini-2.5-flash",
       "veo-3.1",
-      "claude-opus-4.6",
+      "gpt-5.4",
+      "gpt-5.2",
+      "gpt-5-mini",
+      "claude-opus-4.1",
+      "claude-sonnet-4",
+      "claude-haiku-3.5",
+      "gemini-3-pro-preview",
+      "gemini-3-flash",
+      "gemini-2.5-flash-lite",
     ]);
   });
 
@@ -33,20 +40,22 @@ describe("studio-model-configuration", () => {
   });
 
   it("returns only configured prompt-bar models", () => {
-    const models = getConfiguredStudioModels(["veo-3.1", "claude-opus-4.6"]);
+    const models = getConfiguredStudioModels(["veo-3.1", "claude-opus-4.1"]);
     expect(models.map((model) => model.id)).toEqual([
       "veo-3.1",
-      "claude-opus-4.6",
+      "claude-haiku-3.5",
+      "claude-opus-4.1",
+      "claude-sonnet-4",
     ]);
   });
 
   it("resolves disabled models to a visible model in the same section first", () => {
     expect(
       resolveConfiguredStudioModelId({
-        currentModelId: "gpt-4.1",
-        enabledModelIds: ["nano-banana-2", "claude-opus-4.6"],
+        currentModelId: "gpt-5.4",
+        enabledModelIds: ["nano-banana-2", "claude-opus-4.1"],
       })
-    ).toBe("claude-opus-4.6");
+    ).toBe("claude-haiku-3.5");
   });
 
   it("does not remove the last remaining enabled model", () => {
@@ -62,8 +71,14 @@ describe("studio-model-configuration", () => {
     expect(
       toggleStudioModelEnabled({
         enabledModelIds: ["nano-banana-2", "veo-3.1"],
-        modelId: "claude-opus-4.6",
+        modelId: "claude-opus-4.1",
       })
-    ).toEqual(["nano-banana-2", "veo-3.1", "claude-opus-4.6"]);
+    ).toEqual([
+      "nano-banana-2",
+      "veo-3.1",
+      "claude-opus-4.1",
+      "claude-sonnet-4",
+      "claude-haiku-3.5",
+    ]);
   });
 });

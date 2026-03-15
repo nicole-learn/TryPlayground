@@ -349,7 +349,7 @@ function createCreditBalance(mode: StudioAppMode): StudioCreditBalance | null {
 
   return {
     userId: HOSTED_STUDIO_USER_ID,
-    balanceCredits: 420,
+    balanceCredits: 5,
     updatedAt: SEED_BASE_TIMESTAMP,
   };
 }
@@ -362,7 +362,7 @@ function createActiveCreditPack(mode: StudioAppMode): StudioCreditPack | null {
   return {
     id: "credit-pack-100",
     credits: 100,
-    priceCents: 100,
+    priceCents: 1000,
     currency: "usd",
     isActive: true,
     displayOrder: 0,
@@ -429,11 +429,9 @@ export function createRunFile(params: {
     userId: params.userId,
     fileRole: params.fileRole,
     sourceType: params.sourceType,
-    storageBucket: params.sourceType === "uploaded" ? "browser-upload" : "mock-public",
+    storageBucket: "mock-public",
     storagePath:
-      params.sourceType === "uploaded"
-        ? `uploads/${params.id}/${createStoragePath(params.fileName)}`
-        : params.previewUrl.replace(/^\//, ""),
+      params.previewUrl.replace(/^\//, ""),
     mimeType: params.mimeType,
     fileName: params.fileName,
     fileSizeBytes: params.fileSizeBytes ?? null,
@@ -472,12 +470,10 @@ export function createGeneratedLibraryItem(params: {
 }): LibraryItem {
   const title = params.draft.prompt.trim().slice(0, 40) || params.model.name;
   const backgroundPairs = getPreviewBackgroundPairs();
-  const folderIds = params.folderId ? [params.folderId] : [];
-
   if (params.model.kind === "text") {
     const body = [
       `Creative direction for: ${params.draft.prompt.trim() || "Untitled request"}.`,
-      `Tone: ${params.draft.tone}. Keep the language concise, useful, and ready to evolve into image or video prompts.`,
+      "Keep the language concise, useful, and ready to evolve into image or video prompts.",
       `Suggested next step: turn the strongest paragraph into a shot list or visual prompt sequence.`,
     ].join(" ");
 
@@ -498,17 +494,16 @@ export function createGeneratedLibraryItem(params: {
       updatedAt: params.createdAt,
       modelId: params.model.id,
       runId: params.runId ?? null,
-      provider: "fal",
+      provider: params.model.provider,
       status: "ready",
       prompt: params.draft.prompt,
-      meta: `${params.model.name} • ${params.draft.maxTokens} max tokens • ${params.draft.tone}`,
+      meta: params.model.name,
       mediaWidth: null,
       mediaHeight: null,
       mediaDurationSeconds: null,
       aspectRatioLabel: null,
       hasAlpha: false,
       folderId: params.folderId,
-      folderIds,
       storageBucket: "inline-text",
       storagePath: null,
       thumbnailPath: null,
@@ -630,7 +625,6 @@ export function createGeneratedLibraryItem(params: {
         : formatAspectRatioLabel({ mediaWidth, mediaHeight }) ?? params.draft.aspectRatio,
     hasAlpha,
     folderId: params.folderId,
-    folderIds,
     storageBucket: previewUrl.startsWith("/mock-media/") ? "mock-public" : "inline-preview",
     storagePath: previewUrl.startsWith("/") ? previewUrl.replace(/^\//, "") : previewUrl,
     thumbnailPath: thumbnailUrl.startsWith("/") ? thumbnailUrl.replace(/^\//, "") : null,
@@ -680,7 +674,7 @@ export function createGenerationRunSummary(
     return `${inputModeLabel} • ${draft.durationSeconds}s • ${draft.resolution}`;
   }
 
-  return `${draft.tone} • ${draft.maxTokens} max tokens`;
+  return "Text generation";
 }
 
 export function createGenerationRunPreviewUrl(
@@ -752,7 +746,6 @@ function createMockUploadedSeedItem(params: {
               accentSeed: params.title,
             })
           : previewUrl);
-  const folderIds = params.folderId ? [params.folderId] : [];
   const mimeType =
     params.kind === "text"
       ? "text/plain"
@@ -813,7 +806,6 @@ function createMockUploadedSeedItem(params: {
           }),
     hasAlpha: params.hasAlpha ?? false,
     folderId: params.folderId,
-    folderIds,
     storageBucket: params.kind === "text" ? "inline-text" : "mock-public",
     storagePath:
       params.kind === "text" ? null : previewUrl?.replace(/^\//, "") ?? null,
@@ -954,10 +946,16 @@ export function buildStudioDraftMap() {
 }
 
 export function hydrateDraft(persistedDraft: PersistedStudioDraft, model: StudioModelDefinition) {
-  return {
+  const hydratedDraft = {
     ...createDraft(model),
     ...persistedDraft,
   };
+
+  if (model.kind === "text" && model.maxOutputTokens) {
+    hydratedDraft.maxTokens = model.maxOutputTokens;
+  }
+
+  return hydratedDraft;
 }
 
 export function createStudioSeedSnapshot(mode: StudioAppMode): StudioWorkspaceSnapshot {
@@ -968,7 +966,7 @@ export function createStudioSeedSnapshot(mode: StudioAppMode): StudioWorkspaceSn
   const backgroundRemovalModel = getStudioModelById("bria-rmbg-2");
   const videoModel = getStudioModelById("veo-3.1");
   const audioModel = getStudioModelById("minimax-speech-2.8-hd");
-  const textModel = getStudioModelById("gemini-2.5-flash");
+  const textModel = getStudioModelById("gemini-3-flash");
 
   const imageDraft = {
     ...createDraft(imageModel),
@@ -1375,7 +1373,13 @@ export function createStudioSeedSnapshot(mode: StudioAppMode): StudioWorkspaceSn
     profile: createProfile(mode),
     providerSettings: {
       falApiKey: "",
-      lastValidatedAt: null,
+      falLastValidatedAt: null,
+      openaiApiKey: "",
+      openaiLastValidatedAt: null,
+      anthropicApiKey: "",
+      anthropicLastValidatedAt: null,
+      geminiApiKey: "",
+      geminiLastValidatedAt: null,
     },
     creditBalance: createCreditBalance(mode),
     activeCreditPack: createActiveCreditPack(mode),

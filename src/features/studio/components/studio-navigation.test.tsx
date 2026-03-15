@@ -35,7 +35,6 @@ describe("studio navigation surfaces", () => {
         onClearSelection={onClearSelection}
         onDeleteSelected={onDeleteSelected}
         onDownloadSelected={onDownloadSelected}
-        onOpenCreateText={vi.fn()}
         onOpenAccount={vi.fn()}
         onOpenFeedback={vi.fn()}
         onOpenUpload={vi.fn()}
@@ -57,9 +56,8 @@ describe("studio navigation surfaces", () => {
     expect(onDeleteSelected).toHaveBeenCalledTimes(1);
   });
 
-  it("renders the mobile rail feedback action and folder shortcuts", async () => {
+  it("renders the mobile rail folder shortcuts", async () => {
     const user = userEvent.setup();
-    const onOpenFeedback = vi.fn();
     const onSelectFolder = vi.fn();
 
     render(
@@ -79,7 +77,7 @@ describe("studio navigation surfaces", () => {
         onCreateFolder={vi.fn()}
         onOpenCreateText={vi.fn()}
         onOpenAccount={vi.fn()}
-        onOpenFeedback={onOpenFeedback}
+        onOpenFeedback={vi.fn()}
         onOpenUpload={vi.fn()}
         onSelectFolder={onSelectFolder}
         onSizeLevelChange={vi.fn()}
@@ -88,10 +86,8 @@ describe("studio navigation surfaces", () => {
     );
 
     await user.click(screen.getByTitle("References (3)"));
-    await user.click(screen.getByRole("button", { name: "Feedback" }));
 
     expect(onSelectFolder).toHaveBeenCalledWith("folder-1");
-    expect(onOpenFeedback).toHaveBeenCalledTimes(1);
   });
 
   it("switches modes from the dev mode overlay", async () => {
@@ -100,7 +96,15 @@ describe("studio navigation surfaces", () => {
 
     render(<StudioDevModeOverlay appMode="local" onChange={onChange} />);
 
-    await user.click(screen.getByRole("button", { name: "Toggle dev mode switcher" }));
+    const toggleButton = screen.getByRole("button", {
+      name: "Toggle dev mode switcher",
+    });
+
+    expect(toggleButton).toHaveClass("size-11");
+
+    await user.click(toggleButton);
+
+    expect(toggleButton).toHaveClass("size-11");
     await user.click(screen.getByRole("button", { name: /Hosted/i }));
 
     expect(onChange).toHaveBeenCalledWith("hosted");

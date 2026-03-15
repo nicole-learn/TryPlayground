@@ -4,6 +4,7 @@ import type { User } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import type { Database } from "./database.types";
 import { getSupabaseAdminEnv, getSupabaseEnv } from "./env";
+import { createStudioRouteError } from "@/server/studio/studio-route-errors";
 
 export function getRequestBearerToken(request: Request) {
   const authorizationHeader = request.headers.get("authorization")?.trim() ?? "";
@@ -44,9 +45,12 @@ export function createSupabaseAdminClient() {
   });
 }
 
-export async function createSupabaseRouteHandlerClient() {
+export async function createSupabaseRouteHandlerClient(options?: {
+  writeCookies?: boolean;
+}) {
   const { publishableKey, url } = getSupabaseEnv();
   const cookieStore = await cookies();
+  const writeCookies = options?.writeCookies ?? false;
 
   return createServerClient<Database>(url, publishableKey, {
     cookies: {
@@ -55,6 +59,10 @@ export async function createSupabaseRouteHandlerClient() {
         return cookieStore.getAll();
       },
       setAll(cookiesToSet) {
+        if (!writeCookies) {
+          return;
+        }
+
         try {
           cookiesToSet.forEach(({ name, value, options }) => {
             cookieStore.set(name, value, options);
@@ -69,19 +77,17 @@ export async function createSupabaseRouteHandlerClient() {
 
 export async function requireSupabaseUser(request: Request) {
   const accessToken = getRequestBearerToken(request);
-  if (!accessToken) {
-    throw new Error("Missing hosted session.");
-  }
-
-  const supabase = createSupabaseUserServerClient(accessToken);
+  const supabase = accessToken
+    ? createSupabaseUserServerClient(accessToken)
+    : await createSupabaseRouteHandlerClient();
   const { data, error } = await supabase.auth.getUser();
 
   if (error || !data.user) {
-    throw new Error("Hosted session is invalid or expired.");
+    createStudioRouteError(401, "Hosted session is invalid or expired.");
   }
 
   return {
-    accessToken,
+    accessToken: accessToken ?? null,
     supabase,
     user: data.user satisfies User,
   };

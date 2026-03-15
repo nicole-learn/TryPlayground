@@ -1,12 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { readUploadedAssetMediaMetadata, readLibraryItemSourceBlob } = vi.hoisted(() => ({
-  readUploadedAssetMediaMetadata: vi.fn(),
+const { readLibraryItemSourceBlob } = vi.hoisted(() => ({
   readLibraryItemSourceBlob: vi.fn(),
-}));
-
-vi.mock("./studio-asset-metadata", () => ({
-  readUploadedAssetMediaMetadata,
 }));
 
 vi.mock("./studio-library-item-source", async () => {
@@ -25,14 +20,13 @@ import {
   createDraftReferenceFromLibraryItem,
   createFolderItemCounts,
   createTextLibraryItem,
-  createUploadedRunFileAndLibraryItem,
   getReferenceInputKindFromFile,
   hasFolderNameConflict,
   isInFlightStudioRunStatus,
   isReferenceEligibleLibraryItem,
   mergeDraftReferences,
 } from "./studio-local-runtime-helpers";
-import type { DraftReference, LibraryItem, StudioFolder } from "./types";
+import type { DraftReference, GenerationRun, LibraryItem, StudioFolder } from "./types";
 
 function createFolder(id: string, name: string): StudioFolder {
   return {
@@ -74,7 +68,6 @@ function createItem(overrides?: Partial<LibraryItem>): LibraryItem {
     aspectRatioLabel: null,
     hasAlpha: false,
     folderId: null,
-    folderIds: [],
     storageBucket: "hosted-media",
     storagePath: "users/user-1/asset.png",
     thumbnailPath: null,
@@ -89,7 +82,6 @@ function createItem(overrides?: Partial<LibraryItem>): LibraryItem {
 
 describe("studio-local-runtime-helpers", () => {
   beforeEach(() => {
-    readUploadedAssetMediaMetadata.mockReset();
     readLibraryItemSourceBlob.mockReset();
     vi.restoreAllMocks();
   });
@@ -100,9 +92,20 @@ describe("studio-local-runtime-helpers", () => {
       { folderId: "folder-a" },
       { folderId: "folder-a" },
       { folderId: "folder-b" },
-    ] as Pick<LibraryItem, "folderId">[]);
+    ] as Pick<LibraryItem, "folderId">[], [
+      {
+        folderId: "folder-b",
+        outputAssetId: null,
+        status: "failed",
+      },
+      {
+        folderId: "folder-b",
+        outputAssetId: "asset-99",
+        status: "completed",
+      },
+    ] as Pick<GenerationRun, "folderId" | "outputAssetId" | "status">[]);
 
-    expect(counts).toEqual({ "folder-a": 2, "folder-b": 1 });
+    expect(counts).toEqual({ "folder-a": 2, "folder-b": 2 });
     expect(hasFolderNameConflict(folders, " references ", null)).toBe(true);
     expect(hasFolderNameConflict(folders, "references", "folder-a")).toBe(false);
   });
@@ -170,41 +173,10 @@ describe("studio-local-runtime-helpers", () => {
 
     expect(item.kind).toBe("text");
     expect(item.fileName).toBe("my-prompt.txt");
-    expect(item.folderIds).toEqual(["folder-a"]);
+    expect(item.folderId).toBe("folder-a");
   });
 
-  it("creates uploaded run files and library items from supported uploads", async () => {
-    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:upload-preview");
-    readUploadedAssetMediaMetadata.mockResolvedValue({
-      mediaWidth: 1600,
-      mediaHeight: 900,
-      mediaDurationSeconds: null,
-      aspectRatioLabel: "16:9",
-      hasAlpha: false,
-    });
-
-    const result = await createUploadedRunFileAndLibraryItem({
-      file: new File(["image"], "render.png", { type: "image/png" }),
-      userId: "user-1",
-      workspaceId: "workspace-1",
-      folderId: "folder-a",
-    });
-
-    expect(result?.runFile.storageBucket).toBe("browser-upload");
-    expect(result?.item.kind).toBe("image");
-    expect(result?.item.folderId).toBe("folder-a");
-    expect(result?.item.aspectRatioLabel).toBe("16:9");
-  });
-
-  it("returns null for unsupported uploads and tracks in-flight run states", async () => {
-    const result = await createUploadedRunFileAndLibraryItem({
-      file: new File(["text"], "notes.txt", { type: "text/plain" }),
-      userId: "user-1",
-      workspaceId: "workspace-1",
-      folderId: null,
-    });
-
-    expect(result).toBeNull();
+  it("tracks in-flight run states", () => {
     expect(isInFlightStudioRunStatus("queued")).toBe(true);
     expect(isInFlightStudioRunStatus("completed")).toBe(false);
   });

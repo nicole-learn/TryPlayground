@@ -65,7 +65,7 @@ import type {
   HostedStudioMutationResponse,
   HostedStudioSyncResponse,
   HostedStudioUploadManifestEntry,
-} from "./studio-hosted-mock-api";
+} from "./studio-hosted-api";
 import { getStudioUploadedMediaKind, studioUploadSupportsAlpha } from "./studio-upload-files";
 import type {
   DraftReference,
@@ -77,20 +77,56 @@ import type {
   StudioHostedAccount,
   StudioHostedWorkspaceState,
   StudioModelConfiguration,
-  StudioProviderConnectionStatus,
+  StudioProviderKeyId,
   StudioProviderSaveResult,
   StudioProviderSettings,
   StudioVideoInputMode,
   StudioWorkspaceSnapshot,
 } from "./types";
-import { LOCAL_FAL_KEY_HEADER } from "./studio-provider-constants";
 
 const EMPTY_PROVIDER_SETTINGS: StudioProviderSettings = {
   falApiKey: "",
-  lastValidatedAt: null,
+  falLastValidatedAt: null,
+  openaiApiKey: "",
+  openaiLastValidatedAt: null,
+  anthropicApiKey: "",
+  anthropicLastValidatedAt: null,
+  geminiApiKey: "",
+  geminiLastValidatedAt: null,
 };
 
 type HostedAuthStatus = "checking" | "signed_out" | "signed_in";
+
+function getProviderKeyIdForModelProvider(
+  provider: "fal" | "openai" | "anthropic" | "google"
+): StudioProviderKeyId {
+  switch (provider) {
+    case "openai":
+      return "openai";
+    case "anthropic":
+      return "anthropic";
+    case "google":
+      return "gemini";
+    default:
+      return "fal";
+  }
+}
+
+function getLocalProviderKeyForModel(params: {
+  provider: "fal" | "openai" | "anthropic" | "google";
+  providerSettings: StudioProviderSettings;
+}) {
+  switch (params.provider) {
+    case "openai":
+      return params.providerSettings.openaiApiKey.trim();
+    case "anthropic":
+      return params.providerSettings.anthropicApiKey.trim();
+    case "google":
+      return params.providerSettings.geminiApiKey.trim();
+    default:
+      return params.providerSettings.falApiKey.trim();
+  }
+}
 
 function createSignedOutHostedSnapshot(seedSnapshot: StudioWorkspaceSnapshot) {
   return {
@@ -159,25 +195,70 @@ async function fetchHostedWithSession(
   throw new Error("Your hosted session expired. Sign in with Google again.");
 }
 
-function createLocalFalHeaders(falApiKey?: string | null) {
-  const headers = new Headers();
-  if (falApiKey?.trim()) {
-    headers.set(LOCAL_FAL_KEY_HEADER, falApiKey.trim());
-  }
-  return headers;
-}
-
 function isAbortRequestError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
+async function submitFeedbackRequest(params: {
+  message: string;
+  signal?: AbortSignal;
+}) {
+  const response = await fetch("/api/feedback", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      message: params.message,
+    }),
+    cache: "no-store",
+    credentials: "same-origin",
+    signal: params.signal,
+  });
+
+  const payload = (await response.json()) as { ok?: boolean; error?: string };
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.error ?? "Could not submit feedback.");
+  }
+}
+
+async function syncLocalProviderSession(
+  providerSettings: StudioProviderSettings,
+  signal?: AbortSignal
+) {
+  const keyMap = {
+    falApiKey: providerSettings.falApiKey.trim(),
+    openaiApiKey: providerSettings.openaiApiKey.trim(),
+    anthropicApiKey: providerSettings.anthropicApiKey.trim(),
+    geminiApiKey: providerSettings.geminiApiKey.trim(),
+  };
+  const hasAnyKey = Object.values(keyMap).some((value) => value.length > 0);
+  const response = await fetch("/api/studio/local/provider-session", {
+    method: hasAnyKey ? "POST" : "DELETE",
+    headers: hasAnyKey
+      ? {
+          "Content-Type": "application/json",
+        }
+      : undefined,
+    body: hasAnyKey
+      ? JSON.stringify(keyMap)
+      : undefined,
+    cache: "no-store",
+    credentials: "same-origin",
+    signal,
+  });
+  const payload = (await response.json()) as { error?: string; ok?: boolean };
+
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.error ?? "Could not sync the local provider session.");
+  }
+}
+
 async function fetchLocalBootstrap(params?: {
-  falApiKey?: string | null;
   signal?: AbortSignal;
 }) {
   const response = await fetch("/api/studio/local/bootstrap", {
     method: "GET",
-    headers: createLocalFalHeaders(params?.falApiKey),
     cache: "no-store",
     credentials: "same-origin",
     signal: params?.signal,
@@ -195,7 +276,6 @@ async function fetchLocalBootstrap(params?: {
 
 async function fetchLocalSync(params: {
   sinceRevision: number | null;
-  falApiKey?: string | null;
   signal?: AbortSignal;
 }) {
   const searchParams = new URLSearchParams();
@@ -205,7 +285,6 @@ async function fetchLocalSync(params: {
 
   const response = await fetch(`/api/studio/local/sync?${searchParams.toString()}`, {
     method: "GET",
-    headers: createLocalFalHeaders(params.falApiKey),
     cache: "no-store",
     credentials: "same-origin",
     signal: params.signal,
@@ -223,16 +302,13 @@ async function fetchLocalSync(params: {
 
 async function mutateLocalSnapshot(
   mutation: LocalStudioMutation,
-  falApiKey?: string | null,
   signal?: AbortSignal
 ) {
   const response = await fetch("/api/studio/local/mutate", {
     method: "POST",
-    headers: (() => {
-      const headers = createLocalFalHeaders(falApiKey);
-      headers.set("Content-Type", "application/json");
-      return headers;
-    })(),
+    headers: {
+      "Content-Type": "application/json",
+    },
     body: JSON.stringify(mutation),
     cache: "no-store",
     credentials: "same-origin",
@@ -252,7 +328,6 @@ async function mutateLocalSnapshot(
 async function uploadLocalFiles(
   files: File[],
   folderId: string | null,
-  falApiKey?: string | null,
   signal?: AbortSignal
 ) {
   const manifest = (
@@ -307,7 +382,6 @@ async function uploadLocalFiles(
   const response = await fetch("/api/studio/local/uploads", {
     method: "POST",
     body: formData,
-    headers: createLocalFalHeaders(falApiKey),
     cache: "no-store",
     credentials: "same-origin",
     signal,
@@ -324,7 +398,6 @@ async function uploadLocalFiles(
 }
 
 async function queueLocalGenerationRequest(params: {
-  falApiKey: string;
   modelId: string;
   folderId: string | null;
   draft: PersistedStudioDraft;
@@ -345,7 +418,6 @@ async function queueLocalGenerationRequest(params: {
 
   const response = await fetch("/api/studio/local/generate", {
     method: "POST",
-    headers: createLocalFalHeaders(params.falApiKey),
     body: formData,
     cache: "no-store",
     credentials: "same-origin",
@@ -519,6 +591,7 @@ async function queueHostedGeneration(params: {
 async function createHostedCheckoutSessionRequest(params: {
   successPath?: string;
   cancelPath?: string;
+  checkoutRequestId?: string;
   signal?: AbortSignal;
 }) {
   const response = await fetchHostedWithSession(
@@ -531,6 +604,7 @@ async function createHostedCheckoutSessionRequest(params: {
       body: JSON.stringify({
         successPath: params.successPath,
         cancelPath: params.cancelPath,
+        checkoutRequestId: params.checkoutRequestId,
       }),
       signal: params.signal,
     }
@@ -588,33 +662,13 @@ async function deleteHostedAccountRequest(signal?: AbortSignal) {
   }
 }
 
-async function submitFeedbackRequest(message: string, signal?: AbortSignal) {
-  const response = await fetch("/api/feedback", {
+async function validateProviderApiKey(provider: StudioProviderKeyId, apiKey: string) {
+  const response = await fetch("/api/providers/validate", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      message,
-    }),
-    cache: "no-store",
-    credentials: "same-origin",
-    signal,
-  });
-  const payload = (await response.json()) as { error?: string; ok?: boolean };
-
-  if (!response.ok || !payload.ok) {
-    throw new Error(payload.error ?? "Could not submit feedback.");
-  }
-}
-
-async function validateFalApiKey(falApiKey: string) {
-  const response = await fetch("/api/providers/fal/validate", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ falApiKey }),
+    body: JSON.stringify({ provider, apiKey }),
     cache: "no-store",
     credentials: "same-origin",
   });
@@ -631,7 +685,7 @@ async function validateFalApiKey(falApiKey: string) {
   return payload.validatedAt ?? new Date().toISOString();
 }
 
-export function useStudioMockRuntime(appMode: StudioAppMode) {
+export function useStudioRuntimeCore(appMode: StudioAppMode) {
   const seedSnapshot = useMemo(() => createStudioSeedSnapshot(appMode), [appMode]);
   const signedOutHostedSnapshot = useMemo(
     () => createSignedOutHostedSnapshot(seedSnapshot),
@@ -686,8 +740,8 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     EMPTY_PROVIDER_SETTINGS
   );
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
-  const [providerConnectionStatus, setProviderConnectionStatus] =
-    useState<StudioProviderConnectionStatus>("idle");
+  const [highlightedProviderKey, setHighlightedProviderKey] =
+    useState<StudioProviderKeyId | null>(null);
   const [folderEditorOpen, setFolderEditorOpen] = useState(false);
   const [folderEditorMode, setFolderEditorMode] =
     useState<StudioFolderEditorMode>("create");
@@ -706,18 +760,22 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   const [createTextErrorMessage, setCreateTextErrorMessage] = useState<string | null>(
     null
   );
-  const [feedbackDialogOpen, setFeedbackDialogOpen] = useState(false);
-  const [feedbackMessage, setFeedbackMessage] = useState("");
-  const [feedbackSaving, setFeedbackSaving] = useState(false);
-  const [feedbackErrorMessage, setFeedbackErrorMessage] = useState<string | null>(
-    null
-  );
+  const [savePromptPending, setSavePromptPending] = useState(false);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [uploadDialogFolderId, setUploadDialogFolderId] = useState<string | null>(
     null
   );
   const [uploadAssetsLoading, setUploadAssetsLoading] = useState(false);
   const [uploadErrorMessage, setUploadErrorMessage] = useState<string | null>(null);
+  const [feedbackDialogOpen, setFeedbackDialogOpen] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState("");
+  const [feedbackPending, setFeedbackPending] = useState(false);
+  const [feedbackErrorMessage, setFeedbackErrorMessage] = useState<string | null>(
+    null
+  );
+  const [feedbackSuccessMessage, setFeedbackSuccessMessage] = useState<
+    string | null
+  >(null);
   const [generationErrorDialogOpen, setGenerationErrorDialogOpen] = useState(false);
   const [generationErrorMessage, setGenerationErrorMessage] = useState("");
   const [queueLimitDialogOpen, setQueueLimitDialogOpen] = useState(false);
@@ -744,6 +802,15 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     string | null
   >(null);
   const [hostedSessionUser, setHostedSessionUser] = useState<User | null>(null);
+  const openSettingsDialog = useCallback((highlightedProvider?: StudioProviderKeyId) => {
+    setHighlightedProviderKey(highlightedProvider ?? null);
+    setSettingsDialogOpen(true);
+  }, []);
+
+  const closeSettingsDialog = useCallback(() => {
+    setHighlightedProviderKey(null);
+    setSettingsDialogOpen(false);
+  }, []);
   const normalizedEnabledModelIds = useMemo(
     () => normalizeStudioEnabledModelIds(modelConfiguration.enabledModelIds),
     [modelConfiguration.enabledModelIds]
@@ -797,6 +864,22 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     setRuns(nextState.generationRuns);
     setItems(nextState.libraryItems);
   }, []);
+
+  const applyHostedSyncPayload = useCallback(
+    (payload: HostedStudioSyncResponse) => {
+      if (payload.kind === "noop") {
+        hostedRevisionRef.current = payload.revision;
+        return;
+      }
+
+      applyHostedState(payload.state);
+      if (payload.kind === "bootstrap") {
+        setSelectedModelIdState(payload.uiStateDefaults.selectedModelId);
+        setGallerySizeLevelState(payload.uiStateDefaults.gallerySizeLevel);
+      }
+    },
+    [applyHostedState]
+  );
 
   useEffect(() => {
     runsRef.current = runs;
@@ -1055,7 +1138,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       }
 
       if (!sessionState.accessToken) {
-        setSettingsDialogOpen(false);
+        closeSettingsDialog();
         zeroCreditsDialogOpenedRef.current = false;
       }
     });
@@ -1064,7 +1147,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       cancelled = true;
       unsubscribe();
     };
-  }, [appMode]);
+  }, [appMode, closeSettingsDialog]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1086,8 +1169,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
 
     const resetUiState = () => {
       setProviderSettings(EMPTY_PROVIDER_SETTINGS);
-      setProviderConnectionStatus("idle");
-      setSettingsDialogOpen(false);
+      closeSettingsDialog();
       setSelectedFolderId(null);
       setSelectionModeEnabled(false);
       setSelectedItemIds([]);
@@ -1099,10 +1181,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       setCreateTextTitle("");
       setCreateTextBody("");
       setCreateTextErrorMessage(null);
-      setFeedbackDialogOpen(false);
-      setFeedbackMessage("");
-      setFeedbackSaving(false);
-      setFeedbackErrorMessage(null);
+      setSavePromptPending(false);
       setUploadDialogOpen(false);
       setUploadDialogFolderId(null);
       setQueueLimitDialogOpen(false);
@@ -1144,14 +1223,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
           }
 
           hostedSyncIntervalRef.current = response.syncIntervalMs;
-          applyHostedResponse(response.state, {
-            requestId: request.requestId,
-            sessionId: request.sessionId,
-          });
-          if (response.kind === "bootstrap") {
-            setSelectedModelIdState(response.uiStateDefaults.selectedModelId);
-            setGallerySizeLevelState(response.uiStateDefaults.gallerySizeLevel);
-          }
+          applyHostedSyncPayload(response);
           storageHydratedRef.current = true;
         })
         .catch((error) => {
@@ -1178,13 +1250,18 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     const nextProviderSettings =
       loadStoredProviderSettings() ?? EMPTY_PROVIDER_SETTINGS;
     setProviderSettings(nextProviderSettings);
-    setProviderConnectionStatus(nextProviderSettings.falApiKey ? "connected" : "idle");
     const request = beginLocalRequest();
 
-    void fetchLocalBootstrap({
-      falApiKey: nextProviderSettings.falApiKey,
-      signal: request.controller.signal,
-    })
+    void syncLocalProviderSession(
+      nextProviderSettings,
+      request.controller.signal
+    )
+      .catch(() => undefined)
+      .then(() =>
+        fetchLocalBootstrap({
+          signal: request.controller.signal,
+        })
+      )
       .then((response) => {
         finishLocalRequest(request.controller);
 
@@ -1219,6 +1296,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     abortLocalRequests,
     applySnapshot,
     applyLocalResponse,
+    closeSettingsDialog,
     cleanupDraftReferences,
     cleanupPreviewUrls,
     clearAllTimers,
@@ -1226,6 +1304,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     signedOutHostedSnapshot,
     abortHostedRequests,
     applyHostedResponse,
+    applyHostedSyncPayload,
     hostedAuthStatus,
     beginLocalRequest,
     beginHostedRequest,
@@ -1248,9 +1327,8 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
           draftsByModelId,
           selectedModelId: visibleSelectedModelId,
           gallerySizeLevel,
-          lastValidatedAt: providerSettings.lastValidatedAt,
+          lastValidatedAt: providerSettings.falLastValidatedAt,
         },
-        providerSettings.falApiKey,
         request.controller.signal
       )
         .then((response) => {
@@ -1357,123 +1435,100 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     if (
       appMode !== "hosted" ||
       !storageHydratedRef.current ||
-      !hostedUserSignedIn
+      !hostedUserSignedIn ||
+      typeof window === "undefined"
     ) {
       return;
     }
 
-    let timeoutId = 0;
-    let cancelled = false;
+    const eventsUrl = new URL("/api/studio/hosted/events", window.location.origin);
+    if (hostedRevisionRef.current > 0) {
+      eventsUrl.searchParams.set("sinceRevision", String(hostedRevisionRef.current));
+    }
 
-    const scheduleNextSync = () => {
-      if (cancelled) {
-        return;
+    const eventSource = new EventSource(eventsUrl.toString());
+
+    const handleSync = (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as HostedStudioSyncResponse;
+        applyHostedSyncPayload(payload);
+      } catch {
+        // Ignore malformed realtime payloads and keep the stream alive.
       }
-
-      timeoutId = window.setTimeout(() => {
-        const request = beginHostedRequest();
-
-        void fetchHostedSync({
-          sinceRevision: hostedRevisionRef.current,
-          signal: request.controller.signal,
-        })
-          .then((response) => {
-            finishHostedRequest(request.controller);
-            hostedSyncIntervalRef.current = response.syncIntervalMs;
-
-            if (response.kind !== "noop") {
-              applyHostedResponse(response.state, {
-                requestId: request.requestId,
-                sessionId: request.sessionId,
-              });
-            }
-
-            scheduleNextSync();
-          })
-          .catch((error) => {
-            finishHostedRequest(request.controller);
-            if (error instanceof DOMException && error.name === "AbortError") {
-              return;
-            }
-            // Keep the last known hosted mock state if polling fails.
-            scheduleNextSync();
-          });
-      }, hostedSyncIntervalRef.current);
     };
 
-    scheduleNextSync();
+    const handleError = () => {
+      // EventSource reconnects automatically; keep the last applied state.
+    };
+
+    eventSource.addEventListener("studio-sync", handleSync as EventListener);
+    eventSource.addEventListener("studio-error", handleError as EventListener);
+    eventSource.onerror = handleError;
 
     return () => {
-      cancelled = true;
-      window.clearTimeout(timeoutId);
+      eventSource.removeEventListener("studio-sync", handleSync as EventListener);
+      eventSource.removeEventListener("studio-error", handleError as EventListener);
+      eventSource.close();
     };
-  }, [
-    appMode,
-    hostedUserSignedIn,
-    applyHostedResponse,
-    beginHostedRequest,
-    finishHostedRequest,
-  ]);
+  }, [appMode, applyHostedSyncPayload, hostedUserSignedIn]);
 
   useEffect(() => {
-    if (appMode !== "local" || !storageHydratedRef.current) {
+    if (
+      appMode !== "local" ||
+      !storageHydratedRef.current ||
+      typeof window === "undefined"
+    ) {
       return;
     }
 
-    let timeoutId = 0;
     let cancelled = false;
+    let eventSource: EventSource | null = null;
 
-    const scheduleNextSync = () => {
-      if (cancelled) {
-        return;
-      }
+    void syncLocalProviderSession(providerSettings)
+      .catch(() => undefined)
+      .then(() => {
+        if (cancelled) {
+          return;
+        }
 
-      timeoutId = window.setTimeout(() => {
-        const request = beginLocalRequest();
+        const eventsUrl = new URL("/api/studio/local/events", window.location.origin);
+        if (localRevisionRef.current > 0) {
+          eventsUrl.searchParams.set("sinceRevision", String(localRevisionRef.current));
+        }
 
-        void fetchLocalSync({
-          sinceRevision: localRevisionRef.current,
-          falApiKey: providerSettings.falApiKey,
-          signal: request.controller.signal,
-        })
-          .then((response) => {
-            finishLocalRequest(request.controller);
-            localSyncIntervalRef.current = response.syncIntervalMs;
+        eventSource = new EventSource(eventsUrl.toString());
 
-            if (response.kind !== "noop") {
-              applyLocalResponse(response.snapshot, {
-                preserveDrafts: true,
-                requestId: request.requestId,
-                revision: response.revision,
-                sessionId: request.sessionId,
-              });
-            }
-
-            scheduleNextSync();
-          })
-          .catch((error) => {
-            finishLocalRequest(request.controller);
-            if (error instanceof DOMException && error.name === "AbortError") {
+        const handleSync = (event: MessageEvent<string>) => {
+          try {
+            const payload = JSON.parse(event.data) as LocalStudioSyncResponse;
+            if (payload.kind === "noop") {
+              localRevisionRef.current = payload.revision;
               return;
             }
-            scheduleNextSync();
-          });
-      }, localSyncIntervalRef.current);
-    };
 
-    scheduleNextSync();
+            localRevisionRef.current = payload.revision;
+            applySnapshot(payload.snapshot, {
+              preserveDrafts: true,
+            });
+          } catch {
+            // Ignore malformed realtime payloads and keep the stream alive.
+          }
+        };
+
+        const handleError = () => {
+          // EventSource reconnects automatically; keep the last applied state.
+        };
+
+        eventSource.addEventListener("studio-sync", handleSync as EventListener);
+        eventSource.addEventListener("studio-error", handleError as EventListener);
+        eventSource.onerror = handleError;
+      });
 
     return () => {
       cancelled = true;
-      window.clearTimeout(timeoutId);
+      eventSource?.close();
     };
-  }, [
-    appMode,
-    applyLocalResponse,
-    beginLocalRequest,
-    finishLocalRequest,
-    providerSettings.falApiKey,
-  ]);
+  }, [appMode, applySnapshot, providerSettings]);
 
   const selectedModel = useMemo(
     () => models.find((model) => model.id === visibleSelectedModelId) ?? models[0],
@@ -1543,8 +1598,8 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   }, [runs, selectedFolderId]);
 
   const folderCounts = useMemo(
-    () => createFolderItemCounts(folders, items),
-    [folders, items]
+    () => createFolderItemCounts(folders, items, runs),
+    [folders, items, runs]
   );
 
   const selectedItemIdSet = useMemo(
@@ -1553,7 +1608,12 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
   );
 
   const selectedItemCount = selectedItemIds.length;
-  const hasFalKey = providerSettings.falApiKey.trim().length > 0;
+  const hasFalKey = Boolean(
+    providerSettings.falApiKey.trim() ||
+      providerSettings.openaiApiKey.trim() ||
+      providerSettings.anthropicApiKey.trim() ||
+      providerSettings.geminiApiKey.trim()
+  );
   const maxReferenceFiles = selectedModel.maxReferenceFiles ?? 6;
 
   const applyLocalMutation = useCallback(
@@ -1564,11 +1624,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       const request = beginLocalRequest();
 
       try {
-        const response = await mutateLocalSnapshot(
-          mutation,
-          providerSettings.falApiKey,
-          request.controller.signal
-        );
+        const response = await mutateLocalSnapshot(mutation, request.controller.signal);
         applyLocalResponse(response.snapshot, {
           preserveDrafts: options?.preserveDrafts ?? true,
           requestId: request.requestId,
@@ -1584,7 +1640,6 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       applyLocalResponse,
       beginLocalRequest,
       finishLocalRequest,
-      providerSettings.falApiKey,
     ]
   );
 
@@ -1593,12 +1648,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       const request = beginLocalRequest();
 
       try {
-        const response = await uploadLocalFiles(
-          files,
-          folderId,
-          providerSettings.falApiKey,
-          request.controller.signal
-        );
+        const response = await uploadLocalFiles(files, folderId, request.controller.signal);
         applyLocalResponse(response.snapshot, {
           preserveDrafts: true,
           requestId: request.requestId,
@@ -1614,7 +1664,6 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       applyLocalResponse,
       beginLocalRequest,
       finishLocalRequest,
-      providerSettings.falApiKey,
     ]
   );
 
@@ -1623,7 +1672,6 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
 
     void fetchLocalSync({
       sinceRevision: null,
-      falApiKey: providerSettings.falApiKey,
       signal: request.controller.signal,
     })
       .then((response) => {
@@ -1647,7 +1695,6 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     applyLocalResponse,
     beginLocalRequest,
     finishLocalRequest,
-    providerSettings.falApiKey,
   ]);
 
   const applyHostedMutation = useCallback(
@@ -1751,14 +1798,14 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
 
     if (creditBalance.balanceCredits <= 0) {
       if (!zeroCreditsDialogOpenedRef.current) {
-        setSettingsDialogOpen(true);
+        openSettingsDialog();
         zeroCreditsDialogOpenedRef.current = true;
       }
       return;
     }
 
     zeroCreditsDialogOpenedRef.current = false;
-  }, [appMode, creditBalance, hostedUserSignedIn]);
+  }, [appMode, creditBalance, hostedUserSignedIn, openSettingsDialog]);
 
   useEffect(() => {
     if (settingsDialogOpen) {
@@ -1801,7 +1848,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     })
       .then((payload) => {
         if (payload.status === "completed") {
-          setSettingsDialogOpen(true);
+          openSettingsDialog();
         }
 
         refreshHostedState();
@@ -1824,7 +1871,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     return () => {
       controller.abort();
     };
-  }, [appMode, hostedUserSignedIn, refreshHostedState]);
+  }, [appMode, hostedUserSignedIn, openSettingsDialog, refreshHostedState]);
 
   const hostedSessionAvatarLabel =
     String(
@@ -2352,6 +2399,35 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     [deleteItems]
   );
 
+  const deleteRun = useCallback(
+    (runId: string) => {
+      const targetRun = runsRef.current.find((run) => run.id === runId);
+      if (!targetRun) {
+        return;
+      }
+
+      if (targetRun.outputAssetId) {
+        setSelectedItemIds((current) =>
+          current.filter((itemId) => itemId !== targetRun.outputAssetId)
+        );
+      }
+
+      if (appMode === "hosted") {
+        void applyHostedMutation({
+          action: "delete_runs",
+          runIds: [runId],
+        });
+        return;
+      }
+
+      void applyLocalMutation({
+        action: "delete_runs",
+        runIds: [runId],
+      }).catch(refreshLocalState);
+    },
+    [appMode, applyHostedMutation, applyLocalMutation, refreshLocalState]
+  );
+
   const deleteSelectedItems = useCallback(() => {
     deleteItems(selectedItemIds);
   }, [deleteItems, selectedItemIds]);
@@ -2746,57 +2822,66 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     selectedFolderId,
   ]);
 
-  const openFeedbackDialog = useCallback(() => {
-    if (feedbackSaving) {
+  const saveCurrentPromptAsTextItem = useCallback(async () => {
+    if (savePromptPending) {
       return;
     }
 
-    setFeedbackErrorMessage(null);
-    setFeedbackDialogOpen(true);
-  }, [feedbackSaving]);
-
-  const closeFeedbackDialog = useCallback(() => {
-    if (feedbackSaving) {
+    const nextBody = currentDraft.prompt.trim();
+    if (!nextBody) {
       return;
     }
 
-    setFeedbackDialogOpen(false);
-    setFeedbackMessage("");
-    setFeedbackErrorMessage(null);
-  }, [feedbackSaving]);
-
-  const updateFeedbackMessage = useCallback((value: string) => {
-    setFeedbackMessage(value);
-    setFeedbackErrorMessage(null);
-  }, []);
-
-  const submitFeedback = useCallback(async () => {
-    if (feedbackSaving) {
+    if (appMode === "hosted" && !hostedUserSignedIn) {
+      setHostedAuthDialogOpen(true);
       return;
     }
 
-    const trimmedMessage = feedbackMessage.trim();
-    if (!trimmedMessage) {
-      setFeedbackErrorMessage("Feedback message is required.");
-      return;
-    }
-
-    setFeedbackSaving(true);
-    setFeedbackErrorMessage(null);
+    setSavePromptPending(true);
 
     try {
-      await submitFeedbackRequest(trimmedMessage);
-      setFeedbackDialogOpen(false);
-      setFeedbackMessage("");
-      setFeedbackErrorMessage(null);
+      if (appMode === "hosted") {
+        await applyHostedMutation({
+          action: "create_text_item",
+          title: "",
+          body: currentDraft.prompt,
+          folderId: selectedFolderId,
+        });
+        return;
+      }
+
+      await applyLocalMutation({
+        action: "create_text_item",
+        title: "",
+        body: currentDraft.prompt,
+        folderId: selectedFolderId,
+      });
     } catch (error) {
-      setFeedbackErrorMessage(
-        error instanceof Error ? error.message : "Could not submit feedback."
+      if (isAbortRequestError(error)) {
+        return;
+      }
+
+      surfaceGenerationError(
+        error instanceof Error ? error.message : "Failed to save prompt file."
       );
+
+      if (appMode !== "hosted") {
+        refreshLocalState();
+      }
     } finally {
-      setFeedbackSaving(false);
+      setSavePromptPending(false);
     }
-  }, [feedbackMessage, feedbackSaving]);
+  }, [
+    appMode,
+    applyHostedMutation,
+    applyLocalMutation,
+    currentDraft.prompt,
+    hostedUserSignedIn,
+    refreshLocalState,
+    savePromptPending,
+    selectedFolderId,
+    surfaceGenerationError,
+  ]);
 
   const openUploadDialog = useCallback(() => {
     if (uploadAssetsLoading) {
@@ -2819,6 +2904,28 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
 
   const setUploadDialogFolder = useCallback((folderId: string | null) => {
     setUploadDialogFolderId(folderId);
+  }, []);
+
+  const openFeedbackDialog = useCallback(() => {
+    setFeedbackErrorMessage(null);
+    setFeedbackSuccessMessage(null);
+    setFeedbackDialogOpen(true);
+  }, []);
+
+  const closeFeedbackDialog = useCallback(() => {
+    if (feedbackPending) {
+      return;
+    }
+
+    setFeedbackDialogOpen(false);
+    setFeedbackErrorMessage(null);
+    setFeedbackSuccessMessage(null);
+  }, [feedbackPending]);
+
+  const updateFeedbackMessage = useCallback((value: string) => {
+    setFeedbackMessage(value);
+    setFeedbackErrorMessage(null);
+    setFeedbackSuccessMessage(null);
   }, []);
 
   const uploadFiles = useCallback(
@@ -2853,50 +2960,128 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     [appMode, applyHostedUpload, applyLocalUpload, selectedFolderId, uploadAssetsLoading]
   );
 
+  const submitFeedback = useCallback(async () => {
+    if (feedbackPending) {
+      return;
+    }
+
+    const nextMessage = feedbackMessage.trim();
+    if (!nextMessage) {
+      setFeedbackErrorMessage("Feedback message is required.");
+      return;
+    }
+
+    setFeedbackPending(true);
+    setFeedbackErrorMessage(null);
+    setFeedbackSuccessMessage(null);
+
+    try {
+      await submitFeedbackRequest({
+        message: nextMessage,
+      });
+      setFeedbackMessage("");
+      setFeedbackSuccessMessage("Feedback sent. Thank you.");
+    } catch (error) {
+      if (isAbortRequestError(error)) {
+        return;
+      }
+
+      setFeedbackErrorMessage(
+        error instanceof Error ? error.message : "Could not submit feedback."
+      );
+    } finally {
+      setFeedbackPending(false);
+    }
+  }, [feedbackMessage, feedbackPending]);
+
   const saveProviderSettings = useCallback(
     async (nextSettings: StudioProviderSettings): Promise<StudioProviderSaveResult> => {
-      const falApiKey = nextSettings.falApiKey.trim();
+      const trimmedSettings: StudioProviderSettings = {
+        falApiKey: nextSettings.falApiKey.trim(),
+        falLastValidatedAt: nextSettings.falLastValidatedAt,
+        openaiApiKey: nextSettings.openaiApiKey.trim(),
+        openaiLastValidatedAt: nextSettings.openaiLastValidatedAt,
+        anthropicApiKey: nextSettings.anthropicApiKey.trim(),
+        anthropicLastValidatedAt: nextSettings.anthropicLastValidatedAt,
+        geminiApiKey: nextSettings.geminiApiKey.trim(),
+        geminiLastValidatedAt: nextSettings.geminiLastValidatedAt,
+      };
 
-      if (!falApiKey) {
-        setProviderConnectionStatus("invalid");
-        return {
-          ok: false,
-          errorMessage: "Enter your Fal API key.",
-        };
+      const validations: Array<{
+        provider: StudioProviderKeyId;
+        apiKey: string;
+        lastValidatedAtKey:
+          | "falLastValidatedAt"
+          | "openaiLastValidatedAt"
+          | "anthropicLastValidatedAt"
+          | "geminiLastValidatedAt";
+      }> = [
+        {
+          provider: "fal",
+          apiKey: trimmedSettings.falApiKey,
+          lastValidatedAtKey: "falLastValidatedAt",
+        },
+        {
+          provider: "openai",
+          apiKey: trimmedSettings.openaiApiKey,
+          lastValidatedAtKey: "openaiLastValidatedAt",
+        },
+        {
+          provider: "anthropic",
+          apiKey: trimmedSettings.anthropicApiKey,
+          lastValidatedAtKey: "anthropicLastValidatedAt",
+        },
+        {
+          provider: "gemini",
+          apiKey: trimmedSettings.geminiApiKey,
+          lastValidatedAtKey: "geminiLastValidatedAt",
+        },
+      ];
+
+      for (const validation of validations) {
+        if (!validation.apiKey) {
+          trimmedSettings[validation.lastValidatedAtKey] = null;
+          continue;
+        }
+
+        if (validation.apiKey.length < 16 || /\s/.test(validation.apiKey)) {
+          return {
+            ok: false,
+            errorMessage: `Enter a valid ${validation.provider === "anthropic" ? "Claude" : validation.provider === "openai" ? "OpenAI" : validation.provider === "gemini" ? "Gemini" : "Fal"} API key.`,
+          };
+        }
+
+        try {
+          trimmedSettings[validation.lastValidatedAtKey] =
+            await validateProviderApiKey(validation.provider, validation.apiKey);
+        } catch (error) {
+          return {
+            ok: false,
+            errorMessage:
+              error instanceof Error
+                ? error.message
+                : `Could not validate your ${validation.provider} API key.`,
+          };
+        }
       }
-
-      if (falApiKey.length < 16 || /\s/.test(falApiKey)) {
-        setProviderConnectionStatus("invalid");
-        return {
-          ok: false,
-          errorMessage: "Enter a valid Fal API key.",
-        };
-      }
-
-      let validatedAt = nextSettings.lastValidatedAt;
 
       try {
-        validatedAt = await validateFalApiKey(falApiKey);
+        await syncLocalProviderSession(trimmedSettings);
       } catch (error) {
-        setProviderConnectionStatus("invalid");
         return {
           ok: false,
           errorMessage:
             error instanceof Error
               ? error.message
-              : "Could not validate your Fal API key.",
+              : "Could not sync the local provider session.",
         };
       }
 
-      setProviderSettings({
-        falApiKey,
-        lastValidatedAt: validatedAt ?? new Date().toISOString(),
-      });
-      setProviderConnectionStatus("connected");
+      setProviderSettings(trimmedSettings);
 
       return {
         ok: true,
-        successMessage: "Fal API key connected for this browser session.",
+        successMessage: "API keys connected for this browser session.",
       };
     },
     []
@@ -2906,6 +3091,14 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     setHostedAuthErrorMessage(null);
     setHostedAuthDialogOpen(true);
   }, []);
+
+  const closeHostedAuthDialog = useCallback(() => {
+    if (hostedAuthPending) {
+      return;
+    }
+
+    setHostedAuthDialogOpen(false);
+  }, [hostedAuthPending]);
 
   const signInWithGoogleHostedAccount = useCallback(async () => {
     if (appMode !== "hosted" || hostedAuthPending) {
@@ -2965,6 +3158,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       const checkoutUrl = await createHostedCheckoutSessionRequest({
         successPath,
         cancelPath: successPath,
+        checkoutRequestId: crypto.randomUUID(),
       });
       window.location.assign(checkoutUrl);
       return;
@@ -3034,7 +3228,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
 
     try {
       await signOutHostedSession();
-      setSettingsDialogOpen(false);
+      closeSettingsDialog();
     } catch (error) {
       if (!isAbortRequestError(error)) {
         setAccountActionErrorMessage(
@@ -3044,7 +3238,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     } finally {
       setAccountActionPending(null);
     }
-  }, [accountActionPending, appMode]);
+  }, [accountActionPending, appMode, closeSettingsDialog]);
 
   const deleteHostedAccount = useCallback(async () => {
     if (appMode !== "hosted" || accountActionPending !== null) {
@@ -3058,7 +3252,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     try {
       await deleteHostedAccountRequest(request.controller.signal);
       await signOutHostedSession().catch(() => undefined);
-      setSettingsDialogOpen(false);
+      closeSettingsDialog();
     } catch (error) {
       if (!isAbortRequestError(error)) {
         setAccountActionErrorMessage(
@@ -3069,7 +3263,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       finishHostedRequest(request.controller);
       setAccountActionPending(null);
     }
-  }, [accountActionPending, appMode, beginHostedRequest, finishHostedRequest]);
+  }, [accountActionPending, appMode, beginHostedRequest, closeSettingsDialog, finishHostedRequest]);
 
   const setGallerySizeLevel = useCallback((value: number) => {
     const nextValue = Math.min(Math.max(Math.round(value), 0), 6);
@@ -3093,8 +3287,18 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       return;
     }
 
-    if (appMode === "local" && !hasFalKey) {
-      setSettingsDialogOpen(true);
+    const missingLocalProviderKey =
+      appMode === "local"
+        ? getLocalProviderKeyForModel({
+            provider: selectedModel.provider,
+            providerSettings,
+          })
+          ? null
+          : getProviderKeyIdForModelProvider(selectedModel.provider)
+        : null;
+
+    if (appMode === "local" && missingLocalProviderKey) {
+      openSettingsDialog(missingLocalProviderKey);
       return;
     }
 
@@ -3145,7 +3349,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
               setHostedAuthDialogOpen(true);
             }
             if (error.message === "Not enough credits to queue this generation.") {
-              setSettingsDialogOpen(true);
+              openSettingsDialog();
             }
             surfaceGenerationError(error.message);
             return;
@@ -3160,7 +3364,6 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     const request = beginLocalRequest();
 
     void queueLocalGenerationRequest({
-      falApiKey: providerSettings.falApiKey,
       modelId: selectedModel.id,
       folderId: selectedFolderId,
       draft: createDraftSnapshot(currentDraft),
@@ -3192,11 +3395,10 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
           return;
         }
 
-        if (
-          error instanceof Error &&
-          error.message.toLowerCase().includes("fal api key")
-        ) {
-          setSettingsDialogOpen(true);
+        if (error instanceof Error && error.message.toLowerCase().includes("api key")) {
+          openSettingsDialog(
+            getProviderKeyIdForModelProvider(selectedModel.provider)
+          );
         }
 
         surfaceGenerationError(
@@ -3214,9 +3416,9 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     currentDraft,
     finishLocalRequest,
     finishHostedRequest,
-    hasFalKey,
     hostedUserSignedIn,
-    providerSettings.falApiKey,
+    openSettingsDialog,
+    providerSettings,
     refreshLocalState,
     selectedFolderId,
     selectedModel,
@@ -3228,10 +3430,11 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     addReferences,
     cancelRun,
     clearSelection,
-    closeFeedbackDialog,
     closeCreateTextComposer,
+    closeFeedbackDialog,
     closeFolderEditor,
     closeGenerationErrorDialog,
+    closeHostedAuthDialog,
     closeQueueLimitDialog: () => setQueueLimitDialogOpen(false),
     closeUploadDialog,
     createTextAsset,
@@ -3245,12 +3448,14 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     accountActionPending,
     deleteFolder,
     deleteItem,
+    deleteRun,
     deleteSelectedItems,
+    dropLibraryItemsIntoPromptBar,
     feedbackDialogOpen,
     feedbackErrorMessage,
     feedbackMessage,
-    feedbackSaving,
-    dropLibraryItemsIntoPromptBar,
+    feedbackPending,
+    feedbackSuccessMessage,
     folderCounts,
     folderEditorError,
     folderEditorMode,
@@ -3266,6 +3471,7 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
       items.filter((item) => item.folderId === folderId),
     getPromptBarDropHint,
     hasFalKey,
+    highlightedProviderKey,
     hostedAccount,
     hostedAuthDialogOpen,
     hostedAuthErrorMessage,
@@ -3283,7 +3489,6 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     openFeedbackDialog,
     openRenameFolder,
     openUploadDialog,
-    providerConnectionStatus,
     providerSettings,
     purchaseCreditsErrorMessage,
     purchaseCreditsPending,
@@ -3294,7 +3499,9 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     reuseItem,
     reuseRun,
     saveFolder,
+    saveCurrentPromptAsTextItem,
     saveProviderSettings,
+    savePromptPending,
     selectedFolder,
     selectedFolderId,
     selectedFolderItems,
@@ -3307,7 +3514,8 @@ export function useStudioMockRuntime(appMode: StudioAppMode) {
     settingsDialogOpen,
     setEndFrame: (file: File) => setFrameInput("end", file),
     setGallerySizeLevel,
-    setSettingsDialogOpen,
+    setSettingsDialogOpen: (open: boolean) =>
+      open ? openSettingsDialog() : closeSettingsDialog(),
     setSelectedFolderId,
     setSelectedModelId,
     setStartFrame: (file: File) => setFrameInput("start", file),

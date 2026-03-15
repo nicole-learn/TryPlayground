@@ -1,4 +1,3 @@
-import { loadUploadedAssetFile } from "./studio-browser-storage";
 import type { LibraryItem } from "./types";
 
 function sanitizeBaseName(rawValue: string) {
@@ -75,10 +74,6 @@ export function getLibraryItemDownloadFileName(
 export function getLibraryItemSourceUrl(
   item: Pick<LibraryItem, "storageBucket" | "storagePath" | "previewUrl">
 ) {
-  if (item.storageBucket === "browser-upload") {
-    return null;
-  }
-
   if (item.storageBucket === "local-fs") {
     return item.previewUrl;
   }
@@ -120,10 +115,6 @@ export async function readLibraryItemSourceBlob(
     return new Blob([item.contentText || ""], {
       type: getLibraryItemFallbackMimeType(item),
     });
-  }
-
-  if (item.storageBucket === "browser-upload" && item.storagePath) {
-    return loadUploadedAssetFile(item.storagePath);
   }
 
   const sourceUrl = getLibraryItemSourceUrl(item);

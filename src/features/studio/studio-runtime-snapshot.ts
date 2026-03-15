@@ -1,5 +1,3 @@
-import { loadUploadedAssetFile } from "./studio-browser-storage";
-import { createAudioThumbnailUrl } from "./studio-asset-thumbnails";
 import { STUDIO_STATE_SCHEMA_VERSION } from "./studio-local-runtime-data";
 import type {
   GenerationRun,
@@ -18,57 +16,6 @@ import type {
   StudioWorkspaceDomainState,
   StudioWorkspaceSnapshot,
 } from "./types";
-
-export function sanitizeItemsForWorkspaceSnapshot(items: LibraryItem[]) {
-  return items.map((item) => {
-    if (item.storageBucket !== "browser-upload") {
-      return item;
-    }
-
-    return {
-      ...item,
-      previewUrl: null,
-      thumbnailUrl: null,
-    };
-  });
-}
-
-export async function hydrateUploadedPreviewUrlsForItems(
-  items: LibraryItem[],
-  previewUrls: Map<string, string>
-) {
-  const hydratedItems = await Promise.all(
-    items.map(async (item) => {
-      if (item.storageBucket !== "browser-upload" || !item.storagePath) {
-        return item;
-      }
-
-      const blob = await loadUploadedAssetFile(item.storagePath);
-      if (!blob) {
-        return item;
-      }
-
-      const previewUrl = URL.createObjectURL(blob);
-      previewUrls.set(item.id, previewUrl);
-      const thumbnailUrl =
-        item.kind === "audio"
-          ? createAudioThumbnailUrl({
-              title: item.title,
-              subtitle: item.meta || "Uploaded audio",
-              accentSeed: item.id,
-            })
-          : previewUrl;
-
-      return {
-        ...item,
-        previewUrl,
-        thumbnailUrl,
-      };
-    })
-  );
-
-  return hydratedItems;
-}
 
 interface BuildStudioWorkspaceSnapshotParams {
   activeCreditPack: StudioCreditPack | null;
@@ -101,7 +48,7 @@ export function buildStudioWorkspaceSnapshot(
     queueSettings: params.queueSettings,
     folders: params.folders,
     runFiles: params.runFiles,
-    libraryItems: sanitizeItemsForWorkspaceSnapshot(params.items),
+    libraryItems: params.items,
     generationRuns: params.runs,
     draftsByModelId: params.draftsByModelId,
     selectedModelId: params.selectedModelId,
@@ -131,7 +78,7 @@ export function extractStudioWorkspaceDomainState(
     queueSettings: snapshot.queueSettings,
     folders: snapshot.folders,
     runFiles: snapshot.runFiles,
-    libraryItems: sanitizeItemsForWorkspaceSnapshot(snapshot.libraryItems),
+    libraryItems: snapshot.libraryItems,
     generationRuns: snapshot.generationRuns,
   } satisfies StudioWorkspaceDomainState;
 }

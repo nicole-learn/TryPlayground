@@ -161,6 +161,7 @@ export type Database = {
       credit_purchases: {
         Row: {
           amount_cents: number;
+          checkout_request_id: string | null;
           created_at: string;
           credit_pack_id: string;
           credited_at: string | null;
@@ -172,9 +173,12 @@ export type Database = {
           metadata: Json;
           quantity: number;
           refund_ledger_entry_id: string | null;
+          refunded_amount_cents: number;
+          refunded_credits: number;
           refunded_at: string | null;
           status: string;
           stripe_charge_id: string | null;
+          stripe_checkout_url: string | null;
           stripe_checkout_session_id: string | null;
           stripe_customer_id: string | null;
           stripe_payment_intent_id: string | null;
@@ -184,6 +188,7 @@ export type Database = {
         };
         Insert: {
           amount_cents: number;
+          checkout_request_id?: string | null;
           created_at?: string;
           credit_pack_id: string;
           credited_at?: string | null;
@@ -195,9 +200,12 @@ export type Database = {
           metadata?: Json;
           quantity?: number;
           refund_ledger_entry_id?: string | null;
+          refunded_amount_cents?: number;
+          refunded_credits?: number;
           refunded_at?: string | null;
           status: string;
           stripe_charge_id?: string | null;
+          stripe_checkout_url?: string | null;
           stripe_checkout_session_id?: string | null;
           stripe_customer_id?: string | null;
           stripe_payment_intent_id?: string | null;
@@ -207,6 +215,7 @@ export type Database = {
         };
         Update: {
           amount_cents?: number;
+          checkout_request_id?: string | null;
           created_at?: string;
           credit_pack_id?: string;
           credited_at?: string | null;
@@ -218,9 +227,12 @@ export type Database = {
           metadata?: Json;
           quantity?: number;
           refund_ledger_entry_id?: string | null;
+          refunded_amount_cents?: number;
+          refunded_credits?: number;
           refunded_at?: string | null;
           status?: string;
           stripe_charge_id?: string | null;
+          stripe_checkout_url?: string | null;
           stripe_checkout_session_id?: string | null;
           stripe_customer_id?: string | null;
           stripe_payment_intent_id?: string | null;
@@ -258,6 +270,27 @@ export type Database = {
             referencedColumns: ["user_id"];
           },
         ];
+      };
+      feedback_submissions: {
+        Row: {
+          created_at: string;
+          id: string;
+          message: string;
+          user_id: string | null;
+        };
+        Insert: {
+          created_at?: string;
+          id?: string;
+          message: string;
+          user_id?: string | null;
+        };
+        Update: {
+          created_at?: string;
+          id?: string;
+          message?: string;
+          user_id?: string | null;
+        };
+        Relationships: [];
       };
       folders: {
         Row: {

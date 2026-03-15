@@ -1,20 +1,16 @@
 import { NextResponse } from "next/server";
 import { requireSupabaseUser } from "@/lib/supabase/server";
 import { completeHostedCreditCheckoutSession } from "@/server/studio/hosted-billing";
+import { parseHostedCheckoutCompletePayload } from "@/server/studio/studio-request-validation";
+import { toStudioErrorResponse } from "@/server/studio/studio-route-errors";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
     const { user } = await requireSupabaseUser(request);
-    const payload = (await request.json()) as {
-      checkoutSessionId?: string;
-    };
-    const checkoutSessionId = String(payload.checkoutSessionId ?? "").trim();
-
-    if (!checkoutSessionId) {
-      throw new Error("Stripe checkout session id is required.");
-    }
+    const payload = parseHostedCheckoutCompletePayload(await request.json());
+    const checkoutSessionId = payload.checkoutSessionId;
 
     const result = await completeHostedCreditCheckoutSession({
       checkoutSessionId,
@@ -25,14 +21,6 @@ export async function POST(request: Request) {
     response.headers.set("Cache-Control", "no-store");
     return response;
   } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Could not complete the Stripe checkout session.",
-      },
-      { status: 400 }
-    );
+    return toStudioErrorResponse(error, "Could not complete the Stripe checkout session.");
   }
 }

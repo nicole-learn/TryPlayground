@@ -1,10 +1,18 @@
 import { NextResponse } from "next/server";
 import type {
   HostedStudioGenerateInputDescriptor,
-} from "@/features/studio/studio-hosted-mock-api";
+} from "@/features/studio/studio-hosted-api";
 import type { GenerationRun, PersistedStudioDraft } from "@/features/studio/types";
 import { requireSupabaseUser } from "@/lib/supabase/server";
 import { queueHostedGeneration } from "@/server/studio/hosted-store";
+import {
+  parseHostedGenerateDraft,
+  parseHostedGenerateInputs,
+  parseOptionalFolderId,
+  parseRequiredModelId,
+  validateUploadedInputFiles,
+} from "@/server/studio/studio-request-validation";
+import { toStudioErrorResponse } from "@/server/studio/studio-route-errors";
 
 export const runtime = "nodejs";
 
@@ -12,26 +20,12 @@ export async function POST(request: Request) {
   try {
     const { supabase, user } = await requireSupabaseUser(request);
     const formData = await request.formData();
-    const modelId = String(formData.get("modelId") ?? "").trim();
-    const folderIdValue = formData.get("folderId");
-    const draftValue = formData.get("draft");
-    const inputsValue = formData.get("inputs");
-
-    if (!modelId) {
-      throw new Error("Model id is required.");
-    }
-
-    const draft = draftValue
-      ? (JSON.parse(String(draftValue)) as GenerationRun["draftSnapshot"] | PersistedStudioDraft)
-      : null;
-
-    if (!draft) {
-      throw new Error("Generation draft is required.");
-    }
-
-    const inputs = inputsValue
-      ? (JSON.parse(String(inputsValue)) as HostedStudioGenerateInputDescriptor[])
-      : [];
+    const modelId = parseRequiredModelId(formData.get("modelId"));
+    const folderId = parseOptionalFolderId(formData.get("folderId"));
+    const draft: GenerationRun["draftSnapshot"] | PersistedStudioDraft =
+      parseHostedGenerateDraft(formData.get("draft"));
+    const inputs: HostedStudioGenerateInputDescriptor[] =
+      parseHostedGenerateInputs(formData.get("inputs"));
 
     const uploadedFiles = new Map<string, File>();
     for (const [key, value] of formData.entries()) {
@@ -41,16 +35,15 @@ export async function POST(request: Request) {
 
       uploadedFiles.set(key.slice("input-file:".length), value);
     }
+    validateUploadedInputFiles(inputs, uploadedFiles);
 
     const response = NextResponse.json(
       await queueHostedGeneration({
         supabase,
         user,
         modelId,
-        folderId:
-          typeof folderIdValue === "string" && folderIdValue.trim().length > 0
-            ? folderIdValue
-            : null,
+        webhookBaseUrl: new URL(request.url).origin,
+        folderId,
         draft,
         inputs,
         uploadedFiles,
@@ -59,12 +52,6 @@ export async function POST(request: Request) {
     response.headers.set("Cache-Control", "no-store");
     return response;
   } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Could not queue hosted generation.",
-      },
-      { status: 400 }
-    );
+    return toStudioErrorResponse(error, "Could not queue hosted generation.");
   }
 }

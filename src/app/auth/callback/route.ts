@@ -14,7 +14,9 @@ export async function GET(request: Request) {
   }
 
   if (code) {
-    const supabase = await createSupabaseRouteHandlerClient();
+    const supabase = await createSupabaseRouteHandlerClient({
+      writeCookies: true,
+    });
     const { error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (!error) {

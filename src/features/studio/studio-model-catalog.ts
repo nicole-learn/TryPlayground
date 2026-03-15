@@ -1,6 +1,7 @@
 import type {
   StudioModelDefinition,
   StudioModelSection,
+  StudioTextModelFamilyId,
 } from "./types";
 
 const DEFAULT_IMAGE_DRAFT = {
@@ -33,7 +34,7 @@ const DEFAULT_VIDEO_DRAFT = {
 const DEFAULT_TEXT_DRAFT = {
   ...DEFAULT_IMAGE_DRAFT,
   outputFormat: "text",
-  maxTokens: 4096,
+  maxTokens: 65_536,
 };
 
 const DEFAULT_AUDIO_DRAFT = {
@@ -56,7 +57,6 @@ const COMMON_IMAGE_RATIOS = [
 ] as const;
 
 const COMMON_IMAGE_FORMATS = ["png", "jpeg", "webp"] as const;
-const COMMON_TEXT_MAX_TOKENS = [1024, 2048, 4096, 8192] as const;
 type DraftPatch = Partial<StudioModelDefinition["defaultDraft"]>;
 
 function createTextModel(
@@ -64,7 +64,11 @@ function createTextModel(
     StudioModelDefinition,
     | "id"
     | "name"
+    | "provider"
     | "providerLabel"
+    | "familyId"
+    | "apiModelId"
+    | "maxOutputTokens"
     | "description"
     | "heroGradient"
     | "tags"
@@ -73,18 +77,33 @@ function createTextModel(
 ): StudioModelDefinition {
   return {
     ...config,
+    provider: config.provider,
     kind: "text",
     section: "text",
     requestMode: "chat",
     promptPlaceholder: "Ask anything...",
     supportsNegativePrompt: false,
-    supportsReferences: true,
-    maxReferenceFiles: 10,
-    acceptedReferenceKinds: ["image", "video", "audio", "document"],
-    maxTokenOptions: [...COMMON_TEXT_MAX_TOKENS],
+    supportsReferences: false,
     defaultDraft: {
       ...DEFAULT_TEXT_DRAFT,
+      maxTokens: config.maxOutputTokens ?? DEFAULT_TEXT_DRAFT.maxTokens,
     },
+  };
+}
+
+function createTextModelFamily(
+  familyId: StudioTextModelFamilyId,
+  models: StudioModelDefinition[]
+) {
+  return {
+    id: familyId,
+    label:
+      familyId === "chatgpt"
+        ? "ChatGPT"
+        : familyId === "claude"
+          ? "Claude"
+          : "Gemini",
+    modelIds: models.map((model) => model.id),
   };
 }
 
@@ -110,6 +129,7 @@ function createSpeechModel(
 ): StudioModelDefinition {
   return {
     ...config,
+    provider: "fal",
     kind: "audio",
     section: "audio",
     requestMode: "text-to-speech",
@@ -155,6 +175,7 @@ function createImageModel(
 ): StudioModelDefinition {
   return {
     ...config,
+    provider: "fal",
     kind: "image",
     section: "images",
     requestMode: config.requestMode ?? "text-to-image",
@@ -214,6 +235,7 @@ function createVideoModel(
 ): StudioModelDefinition {
   return {
     ...config,
+    provider: "fal",
     kind: "video",
     section: "videos",
     requestMode: config.supportsFrameInputs ? "text-to-video" : "image-to-video",
@@ -268,31 +290,57 @@ export const STUDIO_MODEL_CATALOG: StudioModelDefinition[] = [
     },
   }),
   createTextModel({
-    id: "claude-opus-4.6",
-    name: "Claude Opus 4.6",
+    id: "claude-opus-4.1",
+    name: "Claude Opus 4.1",
+    provider: "anthropic",
     providerLabel: "Anthropic",
+    familyId: "claude",
+    apiModelId: "claude-opus-4-1-20250805",
+    maxOutputTokens: 64_000,
     description:
-      "High-end reasoning and writing via Fal's OpenRouter router.",
+      "Anthropic's strongest Claude model for deep reasoning, writing, and agentic workflows.",
     heroGradient: "from-violet-300/25 via-fuchsia-300/10 to-transparent",
     tags: ["LLM", "Premium", "Reasoning"],
     pricing: {
       type: "llm",
-      apiCostUsdPerMillionInputTokens: 5,
-      apiCostUsdPerMillionOutputTokens: 25,
+      apiCostUsdPerMillionInputTokens: 15,
+      apiCostUsdPerMillionOutputTokens: 75,
     },
   }),
   createTextModel({
-    id: "claude-sonnet-4.6",
-    name: "Claude Sonnet 4.6",
+    id: "claude-sonnet-4",
+    name: "Claude Sonnet 4",
+    provider: "anthropic",
     providerLabel: "Anthropic",
+    familyId: "claude",
+    apiModelId: "claude-sonnet-4-20250514",
+    maxOutputTokens: 64_000,
     description:
-      "Balanced flagship reasoning and writing via Fal's OpenRouter router.",
+      "Anthropic's balanced flagship for strong reasoning, coding, and everyday assistant work.",
     heroGradient: "from-indigo-300/25 via-violet-300/10 to-transparent",
     tags: ["LLM", "Featured", "Balanced"],
     pricing: {
       type: "llm",
       apiCostUsdPerMillionInputTokens: 3,
       apiCostUsdPerMillionOutputTokens: 15,
+    },
+  }),
+  createTextModel({
+    id: "claude-haiku-3.5",
+    name: "Claude Haiku 3.5",
+    provider: "anthropic",
+    providerLabel: "Anthropic",
+    familyId: "claude",
+    apiModelId: "claude-3-5-haiku-20241022",
+    maxOutputTokens: 8_192,
+    description:
+      "Anthropic's fast low-cost model for chat, extraction, and lightweight generation.",
+    heroGradient: "from-slate-300/25 via-violet-300/10 to-transparent",
+    tags: ["LLM", "Fast", "Affordable"],
+    pricing: {
+      type: "llm",
+      apiCostUsdPerMillionInputTokens: 0.8,
+      apiCostUsdPerMillionOutputTokens: 4,
     },
   }),
   createSpeechModel({
@@ -354,73 +402,111 @@ export const STUDIO_MODEL_CATALOG: StudioModelDefinition[] = [
     outputFormatOptions: [...COMMON_IMAGE_FORMATS],
   }),
   createTextModel({
-    id: "gemini-2.5-flash",
-    name: "Gemini 2.5 Flash",
+    id: "gemini-3-pro-preview",
+    name: "Gemini 3 Pro",
+    provider: "google",
     providerLabel: "Google",
+    familyId: "gemini",
+    apiModelId: "gemini-3-pro-preview",
+    maxOutputTokens: 64_000,
     description:
-      "Fast multimodal prompting through Fal's OpenRouter router.",
+      "Google's strongest current Gemini text model for advanced reasoning and complex generation.",
+    heroGradient: "from-sky-300/25 via-cyan-300/10 to-transparent",
+    tags: ["LLM", "Premium", "Reasoning"],
+    pricing: {
+      type: "llm",
+      apiCostUsdPerMillionInputTokens: 2,
+      apiCostUsdPerMillionOutputTokens: 12,
+    },
+  }),
+  createTextModel({
+    id: "gemini-3-flash",
+    name: "Gemini 3 Flash",
+    provider: "google",
+    providerLabel: "Google",
+    familyId: "gemini",
+    apiModelId: "gemini-3-flash",
+    maxOutputTokens: 64_000,
+    description:
+      "Google's fast, frontier-class Gemini model with strong latency-to-quality balance.",
     heroGradient: "from-cyan-300/25 via-blue-300/10 to-transparent",
     tags: ["LLM", "Fast", "Multimodal"],
     pricing: {
       type: "llm",
-      apiCostUsdPerMillionInputTokens: 0.3,
-      apiCostUsdPerMillionOutputTokens: 2.5,
+      apiCostUsdPerMillionInputTokens: 0.5,
+      apiCostUsdPerMillionOutputTokens: 3,
     },
   }),
   createTextModel({
-    id: "gemini-2.5-pro",
-    name: "Gemini 2.5 Pro",
+    id: "gemini-2.5-flash-lite",
+    name: "Gemini 2.5 Flash-Lite",
+    provider: "google",
     providerLabel: "Google",
+    familyId: "gemini",
+    apiModelId: "gemini-2.5-flash-lite",
+    maxOutputTokens: 65_536,
     description:
-      "High-end multimodal reasoning through Fal's OpenRouter router.",
-    heroGradient: "from-sky-300/25 via-cyan-300/10 to-transparent",
-    tags: ["LLM", "Multimodal", "Reasoning"],
+      "Google's lowest-cost Gemini text model for fast chat, extraction, and support workflows.",
+    heroGradient: "from-cyan-300/25 via-teal-300/10 to-transparent",
+    tags: ["LLM", "Affordable", "Fast"],
     pricing: {
       type: "llm",
-      apiCostUsdPerMillionInputTokens: 1.25,
-      apiCostUsdPerMillionOutputTokens: 10,
+      apiCostUsdPerMillionInputTokens: 0.1,
+      apiCostUsdPerMillionOutputTokens: 0.4,
     },
   }),
   createTextModel({
-    id: "gpt-4.1",
-    name: "GPT-4.1",
+    id: "gpt-5.4",
+    name: "GPT-5.4",
+    provider: "openai",
     providerLabel: "OpenAI",
+    familyId: "chatgpt",
+    apiModelId: "gpt-5.4",
+    maxOutputTokens: 128_000,
     description:
-      "General-purpose text generation and reasoning via Fal's OpenRouter router.",
+      "OpenAI's current top-tier model for high-stakes reasoning, writing, and tool use.",
     heroGradient: "from-blue-300/25 via-sky-300/10 to-transparent",
-    tags: ["LLM", "General"],
+    tags: ["LLM", "Premium", "Reasoning"],
     pricing: {
       type: "llm",
-      apiCostUsdPerMillionInputTokens: 2,
-      apiCostUsdPerMillionOutputTokens: 8,
+      apiCostUsdPerMillionInputTokens: 2.5,
+      apiCostUsdPerMillionOutputTokens: 15,
+    },
+  }),
+  createTextModel({
+    id: "gpt-5.2",
+    name: "GPT-5.2",
+    provider: "openai",
+    providerLabel: "OpenAI",
+    familyId: "chatgpt",
+    apiModelId: "gpt-5.2",
+    maxOutputTokens: 128_000,
+    description:
+      "OpenAI's balanced GPT-5 tier for strong quality, reasoning, and better cost efficiency than the flagship.",
+    heroGradient: "from-sky-300/25 via-blue-300/10 to-transparent",
+    tags: ["LLM", "Balanced", "General"],
+    pricing: {
+      type: "llm",
+      apiCostUsdPerMillionInputTokens: 1.75,
+      apiCostUsdPerMillionOutputTokens: 14,
     },
   }),
   createTextModel({
     id: "gpt-5-mini",
     name: "GPT-5 Mini",
+    provider: "openai",
     providerLabel: "OpenAI",
+    familyId: "chatgpt",
+    apiModelId: "gpt-5-mini",
+    maxOutputTokens: 128_000,
     description:
-      "Fast low-latency LLM routing through Fal's OpenRouter router.",
+      "OpenAI's affordable fast GPT-5 tier for chat, extraction, and light reasoning.",
     heroGradient: "from-blue-300/25 via-indigo-300/10 to-transparent",
     tags: ["LLM", "Fast"],
     pricing: {
       type: "llm",
       apiCostUsdPerMillionInputTokens: 0.25,
       apiCostUsdPerMillionOutputTokens: 2,
-    },
-  }),
-  createTextModel({
-    id: "gpt-oss-120b",
-    name: "GPT OSS 120B",
-    providerLabel: "OpenAI",
-    description:
-      "Cost-efficient open-weight reasoning through Fal's OpenRouter router.",
-    heroGradient: "from-slate-300/25 via-blue-300/10 to-transparent",
-    tags: ["LLM", "Affordable"],
-    pricing: {
-      type: "llm",
-      apiCostUsdPerMillionInputTokens: 0.039,
-      apiCostUsdPerMillionOutputTokens: 0.19,
     },
   }),
   createVideoModel({
@@ -481,20 +567,6 @@ export const STUDIO_MODEL_CATALOG: StudioModelDefinition[] = [
     defaultDraft: {
       includeAudio: false,
       durationSeconds: 5,
-    },
-  }),
-  createTextModel({
-    id: "llama-4-maverick",
-    name: "Llama 4 Maverick",
-    providerLabel: "Meta",
-    description:
-      "Low-cost large-context prompting through Fal's OpenRouter router.",
-    heroGradient: "from-emerald-300/25 via-teal-300/10 to-transparent",
-    tags: ["LLM", "Affordable", "Open"],
-    pricing: {
-      type: "llm",
-      apiCostUsdPerMillionInputTokens: 0.15,
-      apiCostUsdPerMillionOutputTokens: 0.6,
     },
   }),
   createSpeechModel({
@@ -656,7 +728,7 @@ export const STUDIO_MODEL_CATALOG: StudioModelDefinition[] = [
     supportsReferences: true,
     supportsFrameInputs: true,
     supportsEndFrame: true,
-    maxReferenceFiles: 3,
+    maxReferenceFiles: 1,
     acceptedReferenceKinds: ["image"],
     aspectRatioOptions: ["16:9", "9:16"],
     resolutionOptions: ["720p", "1080p", "4K"],
@@ -722,8 +794,8 @@ export const STUDIO_MODEL_SECTIONS = [
   },
   {
     id: "text",
-    title: "LLMs",
-    description: "Large language models",
+    title: "Text",
+    description: "Text generation models",
   },
   {
     id: "audio",
@@ -747,6 +819,21 @@ const STUDIO_MODEL_MAP = new Map(
 export const STUDIO_MODEL_CATALOG_ALPHABETICAL = [...STUDIO_MODEL_CATALOG].sort(
   compareModelNames
 );
+
+export const STUDIO_TEXT_MODEL_FAMILIES = [
+  createTextModelFamily(
+    "chatgpt",
+    STUDIO_MODEL_CATALOG.filter((model) => model.familyId === "chatgpt")
+  ),
+  createTextModelFamily(
+    "claude",
+    STUDIO_MODEL_CATALOG.filter((model) => model.familyId === "claude")
+  ),
+  createTextModelFamily(
+    "gemini",
+    STUDIO_MODEL_CATALOG.filter((model) => model.familyId === "gemini")
+  ),
+].sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base" }));
 
 export function getStudioModelIds() {
   return STUDIO_MODEL_CATALOG.map((model) => model.id);

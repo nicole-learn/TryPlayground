@@ -60,6 +60,7 @@ interface StudioGalleryProps {
   onMoveDraggedItems?: (itemIds: string[]) => void;
   onOpenItem: (itemId: string) => void;
   onCancelRun?: (runId: string) => void;
+  onDeleteRun?: (runId: string) => void;
   onDownloadItem: (itemId: string) => void;
   onReuseItem: (itemId: string) => void;
   onToggleItemSelection: (itemId: string) => void;
@@ -240,6 +241,25 @@ function buildRows(items: GalleryDisplayItem[], containerWidth: number, sizeLeve
   return rows;
 }
 
+function parseGalleryTimestamp(value: string | null | undefined) {
+  if (!value) {
+    return 0;
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getGalleryDisplayItemChronology(displayItem: GalleryDisplayItem) {
+  if (displayItem.type === "run") {
+    return parseGalleryTimestamp(
+      displayItem.run.queueEnteredAt || displayItem.run.createdAt || displayItem.run.updatedAt
+    );
+  }
+
+  return parseGalleryTimestamp(displayItem.item.createdAt || displayItem.item.updatedAt);
+}
+
 function useMeasuredWidth() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
@@ -280,6 +300,7 @@ function AssetTile({
   onDragEndItem,
   onDragStartItem,
   onCancelRun,
+  onDeleteRun,
   onDownloadItem,
   onReuseItem,
   onOpenItem,
@@ -300,6 +321,7 @@ function AssetTile({
     y: number;
   }) => void;
   onCancelRun?: (runId: string) => void;
+  onDeleteRun?: (runId: string) => void;
   onDownloadItem: (itemId: string) => void;
   onOpenItem: (itemId: string) => void;
   onReuseItem: (itemId: string) => void;
@@ -314,6 +336,10 @@ function AssetTile({
     const statusVisual = getRunStatusVisual(displayItem.run.status);
     const statusDescription = getRunStatusDescription(displayItem.run);
     const canCancelRun = displayItem.run.status === "queued" || displayItem.run.status === "pending";
+    const canDeleteRun =
+      Boolean(onDeleteRun) &&
+      !canCancelRun &&
+      displayItem.run.status !== "processing";
 
     return (
       <div
@@ -328,7 +354,12 @@ function AssetTile({
         <span className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_top,rgba(0,0,0,0.54)_0%,rgba(0,0,0,0.28)_42%,rgba(0,0,0,0.12)_100%)]" />
 
         <div className="relative z-10 flex h-full flex-col justify-between p-3 text-white">
-          <div className="flex items-start justify-between gap-3">
+          <div
+            className={cn(
+              "flex items-start justify-between gap-3",
+              canCancelRun || canDeleteRun ? "pr-10" : undefined
+            )}
+          >
             <StatusBadge
               className={statusVisual.badgeClassName}
               icon={statusVisual.icon}
@@ -354,6 +385,22 @@ function AssetTile({
                 title="Cancel queued generation"
               >
                 <X className="size-3.5" />
+              </button>
+            </div>
+          ) : canDeleteRun && onDeleteRun ? (
+            <div className="absolute right-3 top-3 z-20">
+              <button
+                type="button"
+                onMouseDown={handleOverlayButtonMouseDown}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDeleteRun(displayItem.run.id);
+                }}
+                className="inline-flex size-8 items-center justify-center rounded-md border border-destructive/70 bg-destructive/60 text-white backdrop-blur-sm transition hover:bg-destructive/75"
+                aria-label={`Delete ${displayItem.run.prompt}`}
+                title="Delete generation"
+              >
+                <Trash2 className="size-3.5" />
               </button>
             </div>
           ) : null}
@@ -515,9 +562,6 @@ function AssetTile({
           <p className="line-clamp-8 text-sm leading-6 text-black/82">
             {item.contentText || item.prompt || item.title}
           </p>
-          <div className="mt-auto pt-4 text-[11px] uppercase tracking-[0.16em] text-black/52">
-            {item.source === "generated" ? item.meta : item.source}
-          </div>
         </div>
       ) : (
         <div className="flex size-full items-center justify-center bg-[linear-gradient(to_bottom,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] text-white/60">
@@ -653,6 +697,7 @@ export function StudioGallery({
   onMoveDraggedItems,
   onOpenItem,
   onCancelRun,
+  onDeleteRun,
   onDownloadItem,
   onReuseItem,
   onToggleItemSelection,
@@ -690,7 +735,16 @@ export function StudioGallery({
       })
     );
 
-    return [...runDisplayItems, ...outputItems];
+    return [...runDisplayItems, ...outputItems].sort((left, right) => {
+      const chronologyDiff =
+        getGalleryDisplayItemChronology(right) - getGalleryDisplayItemChronology(left);
+
+      if (chronologyDiff !== 0) {
+        return chronologyDiff;
+      }
+
+      return right.key.localeCompare(left.key);
+    });
   }, [items, runCards]);
 
   const rows = useMemo(
@@ -795,6 +849,7 @@ export function StudioGallery({
                         onDragEndItem={onItemDragEnd}
                         onDragStartItem={onItemDragStart}
                         onCancelRun={onCancelRun}
+                        onDeleteRun={onDeleteRun}
                         onDownloadItem={onDownloadItem}
                         onOpenItem={onOpenItem}
                         onReuseItem={onReuseItem}

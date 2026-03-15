@@ -33,6 +33,10 @@ function createModel(pricing: StudioModelPricing): StudioModelDefinition {
   return {
     id: `model-${pricing.type}`,
     name: `Model ${pricing.type}`,
+    provider:
+      pricing.type === "llm"
+        ? "openai"
+        : "fal",
     providerLabel: "Test",
     kind:
       pricing.type === "video"
@@ -64,6 +68,7 @@ function createModel(pricing: StudioModelPricing): StudioModelDefinition {
     promptPlaceholder: "Prompt",
     supportsNegativePrompt: false,
     supportsReferences: false,
+    maxOutputTokens: pricing.type === "llm" ? 128_000 : undefined,
     pricing,
     defaultDraft: createDraft(),
   };
@@ -137,22 +142,18 @@ describe("studio-model-pricing", () => {
     expect(longQuote.billedCredits).toBeGreaterThan(shortQuote.billedCredits);
   });
 
-  it("quotes llm models from prompt tokens and max output tokens", () => {
+  it("quotes llm models from prompt tokens and the model output ceiling", () => {
     const model = createModel({
       type: "llm",
       apiCostUsdPerMillionInputTokens: 4,
       apiCostUsdPerMillionOutputTokens: 12,
     });
-    const lowOutputQuote = quoteStudioDraftPricing(
+    const quote = quoteStudioDraftPricing(
       model,
       createDraft({ prompt: "A short question", maxTokens: 256 })
     );
-    const highOutputQuote = quoteStudioDraftPricing(
-      model,
-      createDraft({ prompt: "A short question", maxTokens: 4096 })
-    );
 
-    expect(highOutputQuote.apiCostUsd).toBeGreaterThan(lowOutputQuote.apiCostUsd);
-    expect(highOutputQuote.pricingSnapshot.max_tokens).toBe(4096);
+    expect(quote.pricingSnapshot.max_tokens).toBe(128000);
+    expect(quote.apiCostUsd).toBeGreaterThan(1);
   });
 });

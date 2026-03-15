@@ -329,42 +329,25 @@ Hosted mode should keep:
 
 Local mode should keep:
 
-- full workspace snapshot in browser storage
-- uploaded blobs in IndexedDB
+- authoritative workspace state in the local backend
+- session-only provider credentials on the client, mirrored into session cookies for local server requests
 
 ## Realtime Strategy
 
-For the real backend, do not rely on Postgres Changes for the main product feed at scale.
+Use app-owned revision streams over SSE as the primary realtime contract.
 
-Use:
+- hosted: `GET /api/studio/hosted/events`
+- local: `GET /api/studio/local/events`
 
-- Supabase Realtime Broadcast
-- private per-workspace topic, for example `workspace:<workspace_id>`
-
-Broadcast compact events such as:
-
-- `run.created`
-- `run.started`
-- `run.completed`
-- `run.failed`
-- `run.cancelled`
-- `item.created`
-- `item.updated`
-- `item.deleted`
-- `folder.created`
-- `folder.updated`
-- `folder.deleted`
-- `folders.reordered`
-- `credits.updated`
-- `models.updated`
+Each stream should emit compact revision-aware sync payloads only when the authoritative workspace revision changes.
 
 Client behavior:
 
-1. Receive event
-2. If the event contains enough data, patch local state
-3. If not, refetch the affected slice only
+1. Keep the last applied revision in memory.
+2. Apply streamed refresh payloads directly when they arrive.
+3. Fall back to the sync endpoint only for bootstrap, reconnect recovery, or explicit refresh.
 
-Do not rebroadcast or refetch the full workspace on every change.
+Do not keep client-side interval polling as the primary realtime model.
 
 ## Queue Strategy
 
@@ -449,5 +432,5 @@ Recommended path shape:
 2. Implement a single bootstrap read path.
 3. Implement storage upload + thumbnail creation.
 4. Implement `generation_runs` dispatch and completion flow.
-5. Add Broadcast events on the workspace topic.
-6. Replace hosted mock sync polling with Broadcast-driven updates.
+5. Add the hosted and local SSE revision streams.
+6. Replace client polling with stream-driven updates.

@@ -2,14 +2,35 @@ import {
   getStudioModelById,
   getStudioModelIds,
   getStudioModelsForPromptBar,
+  STUDIO_MODEL_CATALOG_ALPHABETICAL,
+  STUDIO_TEXT_MODEL_FAMILIES,
 } from "./studio-model-catalog";
+import type { StudioModelConfigurationEntry } from "./types";
 
 const DEFAULT_STUDIO_ENABLED_MODEL_IDS = [
   "nano-banana-2",
-  "gemini-2.5-flash",
   "veo-3.1",
-  "claude-opus-4.6",
+  ...STUDIO_TEXT_MODEL_FAMILIES.flatMap((family) => family.modelIds),
 ];
+
+export const STUDIO_MODEL_CONFIGURATION_ENTRIES: StudioModelConfigurationEntry[] = [
+  ...STUDIO_TEXT_MODEL_FAMILIES,
+  ...STUDIO_MODEL_CATALOG_ALPHABETICAL.filter((model) => !model.familyId).map((model) => ({
+    id: model.id,
+    label: model.name,
+    modelIds: [model.id],
+  })),
+].sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base" }));
+
+function getConfigurationEntryById(entryId: string) {
+  return (
+    STUDIO_MODEL_CONFIGURATION_ENTRIES.find((entry) => entry.id === entryId) ?? {
+      id: entryId,
+      label: entryId,
+      modelIds: [entryId],
+    }
+  );
+}
 
 export function createDefaultStudioEnabledModelIds() {
   const validIdSet = new Set(getStudioModelIds());
@@ -25,8 +46,26 @@ export function normalizeStudioEnabledModelIds(
   const dedupedValidIds = Array.from(
     new Set((enabledModelIds ?? []).filter((modelId) => validIdSet.has(modelId)))
   );
+  const expandedTextFamilies = STUDIO_TEXT_MODEL_FAMILIES.flatMap((family) => {
+    const enabledFamilyModelIds = family.modelIds.filter((modelId) =>
+      dedupedValidIds.includes(modelId)
+    );
 
-  return dedupedValidIds.length > 0 ? dedupedValidIds : defaultIds;
+    if (enabledFamilyModelIds.length === 0) {
+      return [];
+    }
+
+    return family.modelIds;
+  });
+  const normalizedIds = Array.from(
+    new Set(
+      dedupedValidIds
+        .filter((modelId) => !getStudioModelById(modelId).familyId)
+        .concat(expandedTextFamilies)
+    )
+  );
+
+  return normalizedIds.length > 0 ? normalizedIds : defaultIds;
 }
 
 export function getConfiguredStudioModels(enabledModelIds: string[]) {
@@ -59,14 +98,24 @@ export function toggleStudioModelEnabled(params: {
   modelId: string;
 }) {
   const normalized = normalizeStudioEnabledModelIds(params.enabledModelIds);
+  const entry = getConfigurationEntryById(params.modelId);
+  const isEnabled = entry.modelIds.every((modelId) => normalized.includes(modelId));
+  const nextEnabledIds = isEnabled
+    ? normalized.filter((modelId) => !entry.modelIds.includes(modelId))
+    : [...normalized, ...entry.modelIds];
 
-  if (normalized.includes(params.modelId)) {
-    if (normalized.length === 1) {
-      return normalized;
-    }
-
-    return normalized.filter((modelId) => modelId !== params.modelId);
+  if (nextEnabledIds.length === 0) {
+    return normalized;
   }
 
-  return normalizeStudioEnabledModelIds([...normalized, params.modelId]);
+  return normalizeStudioEnabledModelIds(nextEnabledIds);
+}
+
+export function isStudioModelConfigurationEntryEnabled(params: {
+  entryId: string;
+  enabledModelIds: string[];
+}) {
+  const normalized = normalizeStudioEnabledModelIds(params.enabledModelIds);
+  const entry = getConfigurationEntryById(params.entryId);
+  return entry.modelIds.every((modelId) => normalized.includes(modelId));
 }

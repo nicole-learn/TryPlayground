@@ -2,7 +2,7 @@
 
 ## Overview
 
-TryPlayground is a Fal-powered AI creation studio built around one idea:
+TryPlayground is an AI creation studio built around one idea:
 
 AI tools should feel usable, organized, and consistent the moment you open them.
 
@@ -10,7 +10,7 @@ Instead of splitting text, image, video, speech, and utility creation across dis
 
 TryPlayground is available in two forms:
 
-- an open-source local version for people who want to run everything on their own machine with their own Fal API key
+- an open-source local version for people who want to run everything on their own machine with their own provider API keys
 - a hosted version for people who want a managed experience with simple credit-based billing
 
 Both versions are built around the same studio experience. The difference is how access, billing, and key management work.
@@ -84,16 +84,17 @@ This is especially important for users who generate often. A good AI tool should
 
 The open-source version of TryPlayground is designed for users who want full control.
 
-This version runs locally on a user's own machine. The user brings their own Fal API key, enters it through the in-app provider settings screen, and uses the same studio interface without needing a cloud deployment or managed account.
+This version runs locally on a user's own machine. The user brings their own provider API keys, enters them through the in-app settings screen, and uses the same studio interface without needing a cloud deployment or managed account.
 
 ### How the local version works
 
 In the local version:
 
 - the user installs and runs TryPlayground on their own computer
-- the user enters their Fal API key inside the app
-- the key stays only for the current app session unless the user chooses a more persistent setup later
-- generations are made using the user's own Fal account
+- the user enters the provider API keys they need inside the app
+- the keys stay only for the current app session unless the user chooses a more persistent setup later
+- Fal powers image, video, speech, and background-removal generation
+- OpenAI, Anthropic, and Gemini power the text-model families in local mode
 - files, history, and folders stay local
 - there is no billing layer inside TryPlayground itself
 
@@ -107,7 +108,7 @@ A user should be able to:
 
 1. launch the app
 2. open provider settings
-3. paste in a Fal key
+3. paste in the provider key needed for the model they want to use
 4. start generating
 
 There should be no need to provision cloud infrastructure, create database tables, or configure third-party deployment services just to use the product.
@@ -125,15 +126,16 @@ The local version is a strong fit for:
 
 The hosted version is designed for users who want the same product with less setup.
 
-In the hosted version, TryPlayground manages the provider key and infrastructure. A user signs in, buys credits, and starts creating immediately. The UI remains the same studio experience, with one important addition: a profile button in the top-right corner that provides access to account information, credits, and billing.
+In the hosted version, TryPlayground manages the provider integrations and infrastructure. A user signs in, buys credits, and starts creating immediately. The UI remains the same studio experience, with one important addition: a profile button in the top-right corner that provides access to account information, credits, and billing.
 
 ### How the hosted version works
 
 In the hosted version:
 
 - users sign in to a TryPlayground account
-- TryPlayground manages the Fal integration behind the scenes
-- users do not provide their own API key
+- TryPlayground manages Fal, OpenAI, Anthropic, and Gemini integrations behind the scenes
+- users do not provide their own API keys
+- new accounts start with 5 free credits
 - generations are billed through credits
 - outputs, history, and folders live in the user's hosted workspace
 
@@ -150,7 +152,7 @@ The model is:
 - no usage bundles tied to account tiers
 - credits sold in packs of 100 only
 
-Hosted pricing is based on Fal market cost with a 25% platform markup.
+Hosted pricing is based on Fal market cost with a 15% platform markup.
 
 That means users can understand the hosted experience in plain terms:
 
@@ -166,7 +168,7 @@ TryPlayground keeps queueing simple and predictable in both the local and hosted
 
 The rule is:
 
-- each user can have up to 100 active queued or generating items at one time
+- each user can have up to 100 active pending, queued, or processing items at one time
 - this 100-item cap applies in both local and hosted mode
 - if a user tries to submit another generation after reaching that cap, TryPlayground shows a simple popup that says:
 
@@ -222,7 +224,7 @@ The product is defined by:
 - one workspace
 - one shared studio
 - a folder-first organization system
-- a Fal-powered model layer
+- a provider-backed model layer
 - a clean split between local and hosted use
 
 The product does not ask users to learn a workflow language before they can get value from it. It does not bury the creative experience under automation concepts. It keeps the center of gravity on generation, iteration, and organization.
@@ -232,8 +234,8 @@ The product does not ask users to learn a workflow language before they can get 
 ### Open Source / Local
 
 - you run it yourself
-- you add your own Fal API key
-- you pay Fal directly
+- you add your own provider API keys
+- you pay providers directly
 - your files, folders, and history stay local
 - no hosted billing layer
 
@@ -242,7 +244,7 @@ The product does not ask users to learn a workflow language before they can get 
 - TryPlayground manages the provider access
 - you sign in with a TryPlayground account
 - you buy 100-credit packs
-- usage is charged at Fal market cost plus 25%
+- usage is charged at Fal market cost plus 15%
 - your workspace is managed for you
 
 ## The User Promise

@@ -217,7 +217,7 @@ export function StudioMobileRail({
           <Upload className="size-5" />
         </RailButton>
 
-        <RailButton ariaLabel="Feedback" onClick={onOpenFeedback}>
+        <RailButton ariaLabel="Send feedback" onClick={onOpenFeedback}>
           <MessageSquare className="size-5" />
         </RailButton>
       </div>

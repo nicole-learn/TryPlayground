@@ -1,7 +1,14 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Download, FileText, SquareMousePointer, Trash2, Upload, X } from "lucide-react";
+import {
+  Download,
+  MessageSquare,
+  SquareMousePointer,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/cn";
 import type { StudioAppMode } from "../studio-app-mode";
@@ -15,8 +22,8 @@ interface StudioTopBarProps {
   onClearSelection: () => void;
   onDeleteSelected: () => void;
   onDownloadSelected: () => void;
-  onOpenCreateText: () => void;
   onOpenAccount: () => void;
+  onOpenFeedback: () => void;
   onOpenUpload: () => void;
   onToggleSelectionMode: () => void;
   selectedItemCount: number;
@@ -65,8 +72,8 @@ export function StudioTopBar({
   onClearSelection,
   onDeleteSelected,
   onDownloadSelected,
-  onOpenCreateText,
   onOpenAccount,
+  onOpenFeedback,
   onOpenUpload,
   onToggleSelectionMode,
   selectedItemCount,
@@ -142,21 +149,21 @@ export function StudioTopBar({
         </ActionPillButton>
 
         <ActionPillButton
-          ariaLabel="Add prompt"
-          className="min-w-[124px]"
-          onClick={onOpenCreateText}
-        >
-          <FileText className="size-[13px]" />
-          <span>Add Prompt</span>
-        </ActionPillButton>
-
-        <ActionPillButton
           ariaLabel="Upload files"
           className="min-w-[128px]"
           onClick={onOpenUpload}
         >
           <Upload className="size-[13px]" />
           <span>Upload Files</span>
+        </ActionPillButton>
+
+        <ActionPillButton
+          ariaLabel="Send feedback"
+          className="min-w-[112px]"
+          onClick={onOpenFeedback}
+        >
+          <MessageSquare className="size-[13px]" />
+          <span>Feedback</span>
         </ActionPillButton>
         <div className="flex h-[34px] w-[166px] shrink-0 items-center rounded-full bg-white/[0.03] px-3">
           <Slider

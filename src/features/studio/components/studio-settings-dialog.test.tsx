@@ -51,7 +51,13 @@ const MODEL_CONFIGURATION: StudioModelConfiguration = {
 
 const PROVIDER_SETTINGS: StudioProviderSettings = {
   falApiKey: "",
-  lastValidatedAt: null,
+  falLastValidatedAt: null,
+  openaiApiKey: "",
+  openaiLastValidatedAt: null,
+  anthropicApiKey: "",
+  anthropicLastValidatedAt: null,
+  geminiApiKey: "",
+  geminiLastValidatedAt: null,
 };
 
 describe("StudioSettingsDialog", () => {
@@ -72,7 +78,7 @@ describe("StudioSettingsDialog", () => {
         modelConfigurationPending={false}
         open
         purchaseErrorMessage={null}
-        providerConnectionStatus="idle"
+        highlightedProviderKey={null}
         providerSettings={PROVIDER_SETTINGS}
         purchasePending={false}
         onClose={vi.fn()}
@@ -85,11 +91,17 @@ describe("StudioSettingsDialog", () => {
     );
 
     await user.type(screen.getByPlaceholderText("Paste your Fal API key"), "fal_test_key_123456789");
-    await user.click(screen.getByRole("button", { name: "Save API Key" }));
+    await user.click(screen.getByRole("button", { name: "Save API Keys" }));
 
     expect(onSaveProviderSettings).toHaveBeenCalledWith({
       falApiKey: "fal_test_key_123456789",
-      lastValidatedAt: null,
+      falLastValidatedAt: null,
+      openaiApiKey: "",
+      openaiLastValidatedAt: null,
+      anthropicApiKey: "",
+      anthropicLastValidatedAt: null,
+      geminiApiKey: "",
+      geminiLastValidatedAt: null,
     });
     expect(await screen.findByText("Connected.")).toBeInTheDocument();
   });
@@ -109,7 +121,7 @@ describe("StudioSettingsDialog", () => {
         modelConfigurationPending={false}
         open
         purchaseErrorMessage={null}
-        providerConnectionStatus="idle"
+        highlightedProviderKey={null}
         providerSettings={PROVIDER_SETTINGS}
         purchasePending={false}
         onClose={vi.fn()}
@@ -121,7 +133,7 @@ describe("StudioSettingsDialog", () => {
       />
     );
 
-    await user.click(screen.getByRole("button", { name: "Model Configurations" }));
+    await user.click(screen.getByRole("button", { name: "Models" }));
     await user.click(screen.getByRole("button", { name: "Nano Banana 2" }));
 
     expect(onToggleModelEnabled).toHaveBeenCalledWith("nano-banana-2");
@@ -142,7 +154,7 @@ describe("StudioSettingsDialog", () => {
         modelConfigurationPending={false}
         open
         purchaseErrorMessage={null}
-        providerConnectionStatus="idle"
+        highlightedProviderKey={null}
         providerSettings={PROVIDER_SETTINGS}
         purchasePending={false}
         onClose={vi.fn()}
@@ -174,7 +186,7 @@ describe("StudioSettingsDialog", () => {
         modelConfigurationPending={false}
         open
         purchaseErrorMessage={null}
-        providerConnectionStatus="idle"
+        highlightedProviderKey={null}
         providerSettings={PROVIDER_SETTINGS}
         purchasePending={false}
         onClose={vi.fn()}
@@ -186,7 +198,7 @@ describe("StudioSettingsDialog", () => {
       />
     );
 
-    await user.click(screen.getByRole("button", { name: "Account Information" }));
+    await user.click(screen.getByRole("button", { name: "Account" }));
     await user.click(screen.getByRole("button", { name: "Delete Account" }));
 
     expect(screen.getByText(/removes your hosted account/i)).toBeInTheDocument();

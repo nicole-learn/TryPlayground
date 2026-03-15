@@ -59,7 +59,7 @@ function getFolderRowClassName(params: {
   return cn(
     "flex w-full items-center justify-between gap-3 rounded-xl border px-4 py-3 pr-12 text-left text-[15px] transition-all duration-150",
     params.active
-      ? "bg-white/[0.11] font-medium text-foreground"
+      ? "bg-primary font-medium text-primary-foreground"
       : "bg-white/[0.05] text-foreground/84 hover:bg-white/[0.08] hover:text-foreground",
     params.dragOver
       ? "border-primary/65 bg-primary/12 text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--primary)_30%,transparent)]"
@@ -166,7 +166,8 @@ function FolderRow({
           <span
             aria-hidden
             className={cn(
-              "pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-[12px] font-medium tabular-nums text-foreground/38 transition-opacity duration-150",
+              "pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-[12px] font-medium tabular-nums transition-opacity duration-150",
+              active ? "text-primary-foreground" : "text-foreground/38",
               sortingActive
                 ? "opacity-0"
                 : "opacity-100 group-hover:opacity-0 group-focus-within:opacity-0"

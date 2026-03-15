@@ -1,32 +1,35 @@
-import { createAudioThumbnailUrl } from "@/features/studio/studio-asset-thumbnails";
+import { randomUUID } from "node:crypto";
 import {
   createDraft,
-  createGeneratedLibraryItem,
   createGenerationRunPreviewUrl,
   createGenerationRunSummary,
-  createRunFile,
-  createStudioId,
   HOSTED_STUDIO_WORKSPACE_ID,
   hydrateDraft,
   toPersistedDraft,
 } from "@/features/studio/studio-local-runtime-data";
+import { createAudioThumbnailUrl } from "@/features/studio/studio-asset-thumbnails";
 import {
   getHostedStudioFairShare,
   getStudioRunCompletionDelayMs,
   resolveStudioGenerationRequestMode,
-  shouldStudioMockRunFail,
 } from "@/features/studio/studio-generation-rules";
+import { createMediaMetadataFromAspectRatioLabel } from "@/features/studio/studio-asset-metadata";
 import { reorderStudioFoldersByIds } from "@/features/studio/studio-folder-order";
 import { getStudioModelById } from "@/features/studio/studio-model-catalog";
+import {
+  normalizeStudioEnabledModelIds,
+  resolveConfiguredStudioModelId,
+} from "@/features/studio/studio-model-configuration";
 import { quoteStudioDraftPricing } from "@/features/studio/studio-model-pricing";
 import type {
   HostedStudioGenerateInputDescriptor,
   HostedStudioMutation,
   HostedStudioUploadManifestEntry,
-} from "@/features/studio/studio-hosted-mock-api";
+} from "@/features/studio/studio-hosted-api";
 import { getStudioUploadedMediaKind } from "@/features/studio/studio-upload-files";
 import type {
   GenerationRun,
+  LibraryItemKind,
   LibraryItem,
   PersistedStudioDraft,
   StudioCreditBalance,
@@ -41,7 +44,26 @@ import type {
 } from "@/features/studio/types";
 import type { Database, Json } from "@/lib/supabase/database.types";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
-import { applyHostedCreditLedgerEntry } from "@/server/studio/hosted-billing";
+import {
+  applyHostedCreditLedgerEntry,
+  deleteHostedBillingCustomersForUser,
+} from "@/server/studio/hosted-billing";
+import {
+  getStudioFalQueuedResult,
+  getStudioFalQueueStatus,
+  resolveStudioFalCompletedPayload,
+  submitStudioFalRequest,
+  toStudioFalWebhookUrl,
+  type StudioFalInputFile,
+} from "@/server/fal/studio-fal";
+import { getFalServerEnv } from "@/lib/supabase/env";
+import { createSupabaseAdminClient } from "@/lib/supabase/server";
+import { createStudioRouteError } from "@/server/studio/studio-route-errors";
+import { validateStudioGenerationRequest } from "@/server/studio/studio-request-validation";
+import {
+  generateStudioTextProviderPayload,
+  getHostedTextProviderKey,
+} from "@/server/studio/studio-text-providers";
 
 const HOSTED_SYNC_INTERVAL_MS = 1400;
 const HOSTED_MEDIA_BUCKET = "hosted-media";
@@ -53,6 +75,10 @@ type FolderRow = Database["public"]["Tables"]["folders"]["Row"];
 type RunFileRow = Database["public"]["Tables"]["run_files"]["Row"];
 type LibraryItemRow = Database["public"]["Tables"]["library_items"]["Row"];
 type GenerationRunRow = Database["public"]["Tables"]["generation_runs"]["Row"];
+
+function createHostedUuid() {
+  return randomUUID();
+}
 
 function sanitizeStorageFileName(value: string) {
   const normalized = value
@@ -168,6 +194,31 @@ function mapQueueSettings(config: StudioSystemConfigRow, activeHostedUserCount: 
   };
 }
 
+async function assertHostedFolderExists(
+  supabase: HostedSupabaseClient,
+  userId: string,
+  folderId: string | null
+) {
+  if (!folderId) {
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from("folders")
+    .select("id")
+    .eq("id", folderId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data) {
+    createStudioRouteError(404, "The selected folder could not be found.");
+  }
+}
+
 function mapFolder(row: FolderRow): StudioFolder {
   return {
     id: row.id,
@@ -254,7 +305,6 @@ function mapLibraryItem(
     aspectRatioLabel: row.aspect_ratio_label,
     hasAlpha: row.has_alpha,
     folderId: row.folder_id,
-    folderIds: row.folder_id ? [row.folder_id] : [],
     storageBucket: runFile?.storage_bucket ?? (row.kind === "text" ? "inline-text" : "inline-preview"),
     storagePath: runFile?.storage_path ?? null,
     thumbnailPath: thumbnailFile?.storage_path ?? null,
@@ -372,7 +422,30 @@ async function ensureHostedAccount(supabase: HostedSupabaseClient, user: User) {
     throw new Error(insertError?.message ?? "Could not create hosted account.");
   }
 
-  return insertedAccount;
+  await applyHostedCreditLedgerEntry({
+    supabase,
+    userId: user.id,
+    deltaCredits: 5,
+    reason: "admin_adjustment",
+    idempotencyKey: `studio-account:${user.id}:signup-bonus`,
+    sourceEventId: `studio_account:${user.id}:signup_bonus`,
+    metadata: {
+      source: "signup_bonus",
+      description: "Free starting credits",
+    },
+  });
+
+  const { data: creditedAccount, error: reloadError } = await supabase
+    .from("studio_accounts")
+    .select("*")
+    .eq("user_id", user.id)
+    .single();
+
+  if (reloadError || !creditedAccount) {
+    throw new Error(reloadError?.message ?? "Could not reload hosted account.");
+  }
+
+  return creditedAccount;
 }
 
 async function getHostedSystemConfig(supabase: HostedSupabaseClient) {
@@ -453,6 +526,306 @@ async function listHostedUserRuns(supabase: HostedSupabaseClient, userId: string
   }
 
   return data ?? [];
+}
+
+async function listHostedRunInputs(supabase: HostedSupabaseClient, runId: string) {
+  const { data, error } = await supabase
+    .from("generation_run_inputs")
+    .select("*")
+    .eq("run_id", runId)
+    .order("position", { ascending: true });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data ?? [];
+}
+
+async function removeHostedStoragePaths(
+  supabase: HostedSupabaseClient,
+  storagePaths: string[]
+) {
+  if (storagePaths.length === 0) {
+    return;
+  }
+
+  const { error } = await supabase.storage
+    .from(HOSTED_MEDIA_BUCKET)
+    .remove(storagePaths);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+async function deleteHostedRuns(params: {
+  supabase: HostedSupabaseClient;
+  user: User;
+  runIds: string[];
+}) {
+  const targetRunIdSet = new Set(params.runIds);
+  const runRows = await listHostedUserRuns(params.supabase, params.user.id);
+  const targetRuns = runRows.filter((run) => targetRunIdSet.has(run.id));
+
+  if (targetRuns.length === 0) {
+    return;
+  }
+
+  const outputAssetIdSet = new Set(
+    targetRuns
+      .map((run) => run.output_asset_id)
+      .filter((value): value is string => Boolean(value))
+  );
+  const itemRows = await listHostedUserItems(params.supabase, params.user.id);
+  const generatedItems = itemRows.filter(
+    (item) =>
+      outputAssetIdSet.has(item.id) ||
+      (item.source_run_id ? targetRunIdSet.has(item.source_run_id) : false) ||
+      (item.run_id ? targetRunIdSet.has(item.run_id) : false)
+  );
+  const generatedItemIds = generatedItems.map((item) => item.id);
+  const generatedRunFileIdSet = new Set(
+    generatedItems
+      .flatMap((item) => [item.run_file_id, item.thumbnail_file_id])
+      .filter((value): value is string => Boolean(value))
+  );
+  const runFileRows = await listHostedUserRunFiles(params.supabase, params.user.id);
+  const generatedRunFiles = runFileRows.filter(
+    (runFile) =>
+      (runFile.run_id ? targetRunIdSet.has(runFile.run_id) : false) ||
+      generatedRunFileIdSet.has(runFile.id)
+  );
+  const generatedRunFileIds = generatedRunFiles.map((runFile) => runFile.id);
+  const hostedStoragePaths = Array.from(
+    new Set(
+      generatedRunFiles
+        .filter((runFile) => runFile.storage_bucket === HOSTED_MEDIA_BUCKET)
+        .map((runFile) => runFile.storage_path)
+    )
+  );
+
+  for (const run of targetRuns) {
+    if (
+      (run.status === "queued" || run.status === "pending" || run.status === "processing") &&
+      run.estimated_credits
+    ) {
+      await applyHostedCreditLedgerEntry({
+        supabase: params.supabase,
+        userId: params.user.id,
+        deltaCredits: run.estimated_credits,
+        reason: "generation_refund",
+        relatedRunId: run.id,
+        idempotencyKey: `generation:${run.id}:delete_refund`,
+        sourceEventId: `generation_run:${run.id}:deleted`,
+        metadata: {
+          status: run.status,
+        },
+      });
+    }
+  }
+
+  await removeHostedStoragePaths(params.supabase, hostedStoragePaths);
+
+  if (generatedItemIds.length > 0) {
+    const { error: deleteItemsError } = await params.supabase
+      .from("library_items")
+      .delete()
+      .eq("user_id", params.user.id)
+      .in("id", generatedItemIds);
+
+    if (deleteItemsError) {
+      throw new Error(deleteItemsError.message);
+    }
+  }
+
+  if (generatedRunFileIds.length > 0) {
+    const { error: deleteRunFilesError } = await params.supabase
+      .from("run_files")
+      .delete()
+      .eq("user_id", params.user.id)
+      .in("id", generatedRunFileIds);
+
+    if (deleteRunFilesError) {
+      throw new Error(deleteRunFilesError.message);
+    }
+  }
+
+  const { error: deleteRunsError } = await params.supabase
+    .from("generation_runs")
+    .delete()
+    .eq("user_id", params.user.id)
+    .in("id", Array.from(targetRunIdSet));
+
+  if (deleteRunsError) {
+    throw new Error(deleteRunsError.message);
+  }
+}
+
+async function getHostedRunByProviderRequestId(
+  supabase: HostedSupabaseClient,
+  requestId: string
+) {
+  const { data, error } = await supabase
+    .from("generation_runs")
+    .select("*")
+    .eq("provider_request_id", requestId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
+}
+
+async function getHostedRunById(
+  supabase: HostedSupabaseClient,
+  runId: string
+) {
+  const { data, error } = await supabase
+    .from("generation_runs")
+    .select("*")
+    .eq("id", runId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
+}
+
+async function downloadHostedStorageBlob(params: {
+  supabase: HostedSupabaseClient;
+  storageBucket: string;
+  storagePath: string;
+}) {
+  if (params.storageBucket === HOSTED_MEDIA_BUCKET) {
+    const { data, error } = await params.supabase
+      .storage
+      .from(HOSTED_MEDIA_BUCKET)
+      .download(params.storagePath);
+
+    if (error || !data) {
+      throw new Error(error?.message ?? "Could not load hosted input file.");
+    }
+
+    return data;
+  }
+
+  const response = await fetch(resolveStoredAssetUrl(params.storageBucket, params.storagePath) ?? "");
+  if (!response.ok) {
+    throw new Error("Could not download hosted input file.");
+  }
+
+  return response.blob();
+}
+
+async function loadHostedRunInputFiles(params: {
+  supabase: HostedSupabaseClient;
+  run: GenerationRunRow;
+}) {
+  const inputRows = await listHostedRunInputs(params.supabase, params.run.id);
+  if (inputRows.length === 0) {
+    return [] satisfies StudioFalInputFile[];
+  }
+
+  const runFileIds = inputRows
+    .map((row) => row.run_file_id)
+    .filter((value): value is string => Boolean(value));
+  const libraryItemIds = inputRows
+    .map((row) => row.library_item_id)
+    .filter((value): value is string => Boolean(value));
+
+  const [runFilesResult, libraryItemsResult] = await Promise.all([
+    runFileIds.length > 0
+      ? params.supabase
+          .from("run_files")
+          .select("*")
+          .in("id", runFileIds)
+      : Promise.resolve({ data: [], error: null }),
+    libraryItemIds.length > 0
+      ? params.supabase
+          .from("library_items")
+          .select("*")
+          .in("id", libraryItemIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (runFilesResult.error) {
+    throw new Error(runFilesResult.error.message);
+  }
+
+  if (libraryItemsResult.error) {
+    throw new Error(libraryItemsResult.error.message);
+  }
+
+  const runFileMap = new Map((runFilesResult.data ?? []).map((row) => [row.id, row]));
+  const libraryItemMap = new Map((libraryItemsResult.data ?? []).map((row) => [row.id, row]));
+
+  const relatedRunFileIds = (libraryItemsResult.data ?? [])
+    .map((row) => row.run_file_id)
+    .filter((value): value is string => Boolean(value));
+
+  if (relatedRunFileIds.length > 0) {
+    const { data, error } = await params.supabase
+      .from("run_files")
+      .select("*")
+      .in("id", relatedRunFileIds);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    for (const row of data ?? []) {
+      runFileMap.set(row.id, row);
+    }
+  }
+
+  const inputs: StudioFalInputFile[] = [];
+
+  for (const row of inputRows) {
+    const directRunFile = row.run_file_id ? runFileMap.get(row.run_file_id) ?? null : null;
+    const libraryItem = row.library_item_id
+      ? libraryItemMap.get(row.library_item_id) ?? null
+      : null;
+    const libraryRunFile =
+      libraryItem?.run_file_id ? runFileMap.get(libraryItem.run_file_id) ?? null : null;
+    const sourceRunFile = directRunFile ?? libraryRunFile;
+
+    if (!sourceRunFile || !sourceRunFile.storage_path) {
+      continue;
+    }
+
+    const blob = await downloadHostedStorageBlob({
+      supabase: params.supabase,
+      storageBucket: sourceRunFile.storage_bucket,
+      storagePath: sourceRunFile.storage_path,
+    });
+
+    inputs.push({
+      slot:
+        row.input_role === "start_frame"
+          ? "start_frame"
+          : row.input_role === "end_frame"
+            ? "end_frame"
+            : "reference",
+      kind:
+        (libraryItem?.kind as StudioFalInputFile["kind"] | undefined) ??
+        (sourceRunFile.mime_type?.startsWith("video/")
+          ? "video"
+          : sourceRunFile.mime_type?.startsWith("audio/")
+            ? "audio"
+            : "image"),
+      title: libraryItem?.title ?? sourceRunFile.file_name ?? "Input asset",
+      file: blob,
+      fileName: sourceRunFile.file_name,
+      mimeType: sourceRunFile.mime_type,
+    });
+  }
+
+  return inputs;
 }
 
 async function buildHostedDomainState(params: {
@@ -538,116 +911,172 @@ async function buildHostedState(params: {
   };
 }
 
-async function createHostedGeneratedOutput(params: {
+async function uploadHostedGeneratedOutputFile(params: {
   supabase: HostedSupabaseClient;
   run: GenerationRunRow;
+  fileUrl: string;
+  fileName: string | null;
+  mimeType: string | null;
+}) {
+  const response = await fetch(params.fileUrl);
+  if (!response.ok) {
+    throw new Error("Could not download the generated output from Fal.");
+  }
+
+  const blob = await response.blob();
+  const runFileId = createHostedUuid();
+  const fileName =
+    params.fileName ?? `${params.run.model_id}-${params.run.id}.${blob.type.split("/").pop() ?? "bin"}`;
+  const storagePath = `${params.run.user_id}/${runFileId}-${sanitizeStorageFileName(fileName)}`;
+  const { error } = await params.supabase.storage
+    .from(HOSTED_MEDIA_BUCKET)
+    .upload(storagePath, blob, {
+      contentType: params.mimeType ?? blob.type ?? "application/octet-stream",
+      upsert: true,
+    });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return {
+    runFileId,
+    storagePath,
+    byteSize: blob.size,
+    mimeType: params.mimeType ?? blob.type ?? "application/octet-stream",
+    fileName,
+  };
+}
+
+async function completeHostedRunFromProviderPayload(params: {
+  supabase: HostedSupabaseClient;
+  run: GenerationRunRow;
+  payload: Record<string, unknown>;
 }) {
   const model = getStudioModelById(params.run.model_id);
   const draft = hydrateDraft(parseDraftSnapshot(params.run.draft_snapshot, params.run.model_id), model);
-  const finishedAt = new Date().toISOString();
-  const nextRunFileId = params.run.kind === "text" ? null : createStudioId("run-file");
-  const nextItem = createGeneratedLibraryItem({
-    runFileId: nextRunFileId,
-    sourceRunId: params.run.id,
-    model,
-    draft,
-    createdAt: finishedAt,
-    folderId: params.run.folder_id,
-    runId: params.run.id,
-    userId: params.run.user_id,
-    workspaceId: HOSTED_STUDIO_WORKSPACE_ID,
+  const resolved = resolveStudioFalCompletedPayload({
+    modelId: params.run.model_id,
+    requestMode: params.run.request_mode as GenerationRun["requestMode"],
+    draft: toPersistedDraft(draft),
+    payload: params.payload,
   });
+  const finishedAt = new Date().toISOString();
+  const outputTitle =
+    params.run.prompt.trim().slice(0, 72) || `${params.run.model_name} output`;
+  let outputRunFileId: string | null = null;
+  let fileName: string | null = null;
+  let mimeType: string | null = null;
+  let byteSize: number | null = null;
+  let mediaWidth: number | null = null;
+  let mediaHeight: number | null = null;
+  let mediaDurationSeconds: number | null = null;
+  let aspectRatioLabel: string | null = null;
+  let hasAlpha = false;
 
-  if (nextRunFileId && nextItem.previewUrl) {
-    const runFile = createRunFile({
-      id: nextRunFileId,
-      runId: params.run.id,
-      userId: params.run.user_id,
-      sourceType: "generated",
-      fileRole: "output",
-      previewUrl: nextItem.previewUrl,
-      fileName: nextItem.fileName ?? `${params.run.id}.bin`,
-      mimeType: nextItem.mimeType ?? "application/octet-stream",
-      mediaWidth: nextItem.mediaWidth,
-      mediaHeight: nextItem.mediaHeight,
-      mediaDurationSeconds: nextItem.mediaDurationSeconds,
-      hasAlpha: nextItem.hasAlpha,
-      createdAt: finishedAt,
+  if (resolved.outputFile) {
+    const uploaded = await uploadHostedGeneratedOutputFile({
+      supabase: params.supabase,
+      run: params.run,
+      fileUrl: resolved.outputFile.url,
+      fileName: resolved.outputFile.fileName,
+      mimeType: resolved.outputFile.mimeType,
     });
+    outputRunFileId = uploaded.runFileId;
+    fileName = uploaded.fileName;
+    mimeType = uploaded.mimeType;
+    byteSize = uploaded.byteSize;
+    mediaWidth = resolved.outputFile.mediaWidth;
+    mediaHeight = resolved.outputFile.mediaHeight;
+    mediaDurationSeconds = resolved.outputFile.mediaDurationSeconds;
+    aspectRatioLabel = resolved.outputFile.aspectRatioLabel;
+    hasAlpha = resolved.outputFile.hasAlpha;
 
     const { error: runFileError } = await params.supabase.from("run_files").insert({
-      id: runFile.id,
-      run_id: runFile.runId,
-      user_id: runFile.userId,
-      file_role: runFile.fileRole,
-      source_type: runFile.sourceType,
-      storage_bucket: runFile.storageBucket,
-      storage_path: runFile.storagePath,
-      mime_type: runFile.mimeType,
-      file_name: runFile.fileName,
-      file_size_bytes: runFile.fileSizeBytes,
-      media_width: runFile.mediaWidth,
-      media_height: runFile.mediaHeight,
-      media_duration_seconds: runFile.mediaDurationSeconds,
-      aspect_ratio_label: runFile.aspectRatioLabel,
-      has_alpha: runFile.hasAlpha,
-      metadata: runFile.metadata as Json,
-      created_at: runFile.createdAt,
+      id: outputRunFileId,
+      run_id: params.run.id,
+      user_id: params.run.user_id,
+      file_role: "output",
+      source_type: "generated",
+      storage_bucket: HOSTED_MEDIA_BUCKET,
+      storage_path: uploaded.storagePath,
+      mime_type: mimeType,
+      file_name: fileName,
+      file_size_bytes: byteSize,
+      media_width: mediaWidth,
+      media_height: mediaHeight,
+      media_duration_seconds: mediaDurationSeconds,
+      aspect_ratio_label: aspectRatioLabel,
+      has_alpha: hasAlpha,
+      metadata: {} as Json,
+      created_at: finishedAt,
     });
 
     if (runFileError) {
       throw new Error(runFileError.message);
     }
+  } else if (resolved.outputKind !== "text") {
+    const inferredMetadata = createMediaMetadataFromAspectRatioLabel(
+      resolved.outputKind,
+      draft.aspectRatio
+    );
+    mediaWidth = inferredMetadata.mediaWidth;
+    mediaHeight = inferredMetadata.mediaHeight;
+    aspectRatioLabel = inferredMetadata.aspectRatioLabel;
   }
 
+  const nextItemId = createHostedUuid();
   const { error: itemError } = await params.supabase.from("library_items").insert({
-    id: nextItem.id,
-    user_id: nextItem.userId,
-    run_file_id: nextItem.runFileId,
+    id: nextItemId,
+    user_id: params.run.user_id,
+    run_file_id: outputRunFileId,
     thumbnail_file_id: null,
-    source_run_id: nextItem.sourceRunId,
-    title: nextItem.title,
-    kind: nextItem.kind,
-    source: nextItem.source,
-    role: nextItem.role,
-    content_text: nextItem.contentText,
-    created_at: nextItem.createdAt,
-    updated_at: nextItem.updatedAt,
-    model_id: nextItem.modelId,
-    run_id: nextItem.runId,
-    provider: nextItem.provider,
-    status: nextItem.status,
-    prompt: nextItem.prompt,
-    meta: nextItem.meta,
-    media_width: nextItem.mediaWidth,
-    media_height: nextItem.mediaHeight,
-    media_duration_seconds: nextItem.mediaDurationSeconds,
-    aspect_ratio_label: nextItem.aspectRatioLabel,
-    has_alpha: nextItem.hasAlpha,
-    folder_id: nextItem.folderId,
-    file_name: nextItem.fileName,
-    mime_type: nextItem.mimeType,
-    byte_size: nextItem.byteSize,
-    metadata: nextItem.metadata as Json,
-    error_message: nextItem.errorMessage,
+    source_run_id: params.run.id,
+    title: outputTitle,
+    kind: resolved.outputKind,
+    source: "generated",
+    role: "generated_output",
+    content_text: resolved.outputText,
+    created_at: finishedAt,
+    updated_at: finishedAt,
+    model_id: params.run.model_id,
+    run_id: params.run.id,
+    provider: params.run.provider as LibraryItem["provider"],
+    status: "ready",
+    prompt: params.run.prompt,
+    meta: `${params.run.model_name} • ${params.run.summary}`,
+    media_width: mediaWidth,
+    media_height: mediaHeight,
+    media_duration_seconds: mediaDurationSeconds,
+    aspect_ratio_label: aspectRatioLabel,
+    has_alpha: hasAlpha,
+    folder_id: params.run.folder_id,
+    file_name: fileName,
+    mime_type: mimeType,
+    byte_size: byteSize,
+    metadata: resolved.providerPayload as Json,
+    error_message: null,
   });
 
   if (itemError) {
     throw new Error(itemError.message);
   }
 
+  const usageCost =
+    typeof resolved.usageSnapshot.cost === "number" ? resolved.usageSnapshot.cost : null;
   const { error: runError } = await params.supabase
     .from("generation_runs")
     .update({
       status: "completed",
       provider_status: "completed",
-      output_asset_id: nextItem.id,
-      actual_cost_usd: params.run.estimated_cost_usd,
+      output_asset_id: nextItemId,
+      actual_cost_usd: usageCost ?? params.run.estimated_cost_usd,
       actual_credits: params.run.estimated_credits,
       completed_at: finishedAt,
       updated_at: finishedAt,
       can_cancel: false,
-      output_text: nextItem.kind === "text" ? nextItem.contentText : null,
+      output_text: resolved.outputText,
+      usage_snapshot: resolved.usageSnapshot as Json,
     })
     .eq("id", params.run.id)
     .eq("user_id", params.run.user_id);
@@ -661,6 +1090,7 @@ async function failHostedRun(params: {
   supabase: HostedSupabaseClient;
   run: GenerationRunRow;
   refundCredits: boolean;
+  errorMessage: string;
 }) {
   const finishedAt = new Date().toISOString();
 
@@ -673,7 +1103,7 @@ async function failHostedRun(params: {
       failed_at: finishedAt,
       updated_at: finishedAt,
       can_cancel: false,
-      error_message: "Mock Fal generation failed before an output asset was returned.",
+      error_message: params.errorMessage,
     })
     .eq("id", params.run.id)
     .eq("user_id", params.run.user_id);
@@ -701,18 +1131,95 @@ async function failHostedRun(params: {
 async function dispatchHostedRun(params: {
   supabase: HostedSupabaseClient;
   run: GenerationRunRow;
+  webhookBaseUrl: string;
 }) {
+  const model = getStudioModelById(params.run.model_id);
+  const draft = hydrateDraft(
+    parseDraftSnapshot(params.run.draft_snapshot, params.run.model_id),
+    model
+  );
+  const requestMode = params.run.request_mode as GenerationRun["requestMode"];
   const startedAt = new Date().toISOString();
+
+  if (model.kind === "text") {
+    const providerApiKey = getHostedTextProviderKey(params.run.model_id);
+    if (!providerApiKey) {
+      throw new Error(`${model.providerLabel} is not configured on the hosted server.`);
+    }
+
+    const { error: startError } = await params.supabase
+      .from("generation_runs")
+      .update({
+        status: "processing",
+        started_at: startedAt,
+        updated_at: startedAt,
+        provider_status: "running",
+        dispatch_attempt_count: params.run.dispatch_attempt_count + 1,
+        can_cancel: false,
+      })
+      .eq("id", params.run.id)
+      .eq("user_id", params.run.user_id)
+      .in("status", ["queued", "pending"]);
+
+    if (startError) {
+      throw new Error(startError.message);
+    }
+
+    const result = await generateStudioTextProviderPayload({
+      modelId: params.run.model_id,
+      prompt: draft.prompt,
+      providerApiKey,
+    });
+
+    await completeHostedRunFromProviderPayload({
+      supabase: params.supabase,
+      run: {
+        ...params.run,
+        status: "processing",
+        started_at: startedAt,
+        updated_at: startedAt,
+        provider_status: "running",
+      },
+      payload: result.payload,
+    });
+    return;
+  }
+
+  const { falKey, webhookSecret } = getFalServerEnv();
+  if (!webhookSecret) {
+    throw new Error("FAL_WEBHOOK_SECRET is not configured.");
+  }
+
+  const inputs = await loadHostedRunInputFiles({
+    supabase: params.supabase,
+    run: params.run,
+  });
+  const queuedRequest = await submitStudioFalRequest({
+    falKey,
+    modelId: params.run.model_id,
+    requestMode,
+    draft: toPersistedDraft(draft),
+    inputs,
+    webhookUrl: toStudioFalWebhookUrl({
+      baseUrl: params.webhookBaseUrl,
+      runId: params.run.id,
+      webhookSecret,
+    }),
+  });
   const { error } = await params.supabase
     .from("generation_runs")
     .update({
       status: "processing",
       started_at: startedAt,
       updated_at: startedAt,
-      provider_request_id: params.run.provider_request_id ?? `fal_${params.run.id}`,
-      provider_status: "running",
+      provider_request_id: queuedRequest.requestId,
+      provider_status: "in_queue",
       dispatch_attempt_count: params.run.dispatch_attempt_count + 1,
       can_cancel: false,
+      input_payload: {
+        ...parseObjectJson(params.run.input_payload),
+        provider_endpoint_id: queuedRequest.endpointId,
+      } as Json,
     })
     .eq("id", params.run.id)
     .eq("user_id", params.run.user_id)
@@ -723,58 +1230,23 @@ async function dispatchHostedRun(params: {
   }
 }
 
-async function syncHostedUserQueue(params: {
+async function dispatchHostedQueuedRuns(params: {
   supabase: HostedSupabaseClient;
-  user: User;
+  userId: string;
+  systemConfig: StudioSystemConfigRow;
+  activeHostedUserCount: number;
+  runRows: GenerationRunRow[];
+  webhookBaseUrl: string;
 }) {
-  await ensureHostedAccount(params.supabase, params.user);
-  const [systemConfig, activeHostedUserCount, account, runRows] = await Promise.all([
-    getHostedSystemConfig(params.supabase),
-    getActiveHostedUserCount(params.supabase),
-    params.supabase
-      .from("studio_accounts")
-      .select("*")
-      .eq("user_id", params.user.id)
-      .single()
-      .then(({ data, error }) => {
-        if (error || !data) {
-          throw new Error(error?.message ?? "Could not load hosted account.");
-        }
-        return data;
-      }),
-    listHostedUserRuns(params.supabase, params.user.id),
-  ]);
-
-  const processingRuns = runRows.filter((run) => run.status === "processing");
-  for (const run of processingRuns) {
-    const startedAt = run.started_at ? Date.parse(run.started_at) : Date.now();
-    if (Date.now() - startedAt < getStudioRunCompletionDelayMs({ kind: run.kind as GenerationRun["kind"] })) {
-      continue;
-    }
-
-    if (shouldStudioMockRunFail({ prompt: run.prompt })) {
-      await failHostedRun({
-        supabase: params.supabase,
-        run,
-        refundCredits: true,
-      });
-      continue;
-    }
-
-    await createHostedGeneratedOutput({
-      supabase: params.supabase,
-      run,
-    });
-  }
-
-  const refreshedRuns = await listHostedUserRuns(params.supabase, params.user.id);
-  const processingCount = refreshedRuns.filter((run) => run.status === "processing").length;
+  const processingCount = params.runRows.filter(
+    (run) => run.status === "processing"
+  ).length;
   const fairShare = getHostedStudioFairShare({
     queueSettings: {
-      activeHostedUserCount,
-      providerSlotLimit: systemConfig.provider_slot_limit,
+      activeHostedUserCount: params.activeHostedUserCount,
+      providerSlotLimit: params.systemConfig.provider_slot_limit,
     },
-    userId: params.user.id,
+    userId: params.userId,
   });
   const availableDispatchSlots = Math.max(0, fairShare.maxProcessing - processingCount);
 
@@ -782,7 +1254,7 @@ async function syncHostedUserQueue(params: {
     return;
   }
 
-  const queuedRuns = refreshedRuns
+  const queuedRuns = params.runRows
     .filter((run) => run.status === "queued" || run.status === "pending")
     .sort(
       (left, right) =>
@@ -790,23 +1262,233 @@ async function syncHostedUserQueue(params: {
     );
 
   for (const run of queuedRuns.slice(0, availableDispatchSlots)) {
-    await dispatchHostedRun({
+    try {
+      await dispatchHostedRun({
+        supabase: params.supabase,
+        run,
+        webhookBaseUrl: params.webhookBaseUrl,
+      });
+    } catch (error) {
+      await failHostedRun({
+        supabase: params.supabase,
+        run,
+        refundCredits: true,
+        errorMessage:
+          error instanceof Error
+            ? error.message
+            : "The hosted generation could not be submitted to Fal.",
+      });
+    }
+  }
+}
+
+async function syncHostedUserQueue(params: {
+  supabase: HostedSupabaseClient;
+  user: User;
+  webhookBaseUrl: string;
+}) {
+  await ensureHostedAccount(params.supabase, params.user);
+  const [systemConfig, activeHostedUserCount, runRows] = await Promise.all([
+    getHostedSystemConfig(params.supabase),
+    getActiveHostedUserCount(params.supabase),
+    listHostedUserRuns(params.supabase, params.user.id),
+  ]);
+
+  const processingRuns = runRows.filter((run) => run.status === "processing");
+  for (const run of processingRuns) {
+    const model = getStudioModelById(run.model_id);
+    if (model.kind === "text" && model.provider !== "fal") {
+      const startedAt = run.started_at ? Date.parse(run.started_at) : Date.now();
+      if (Date.now() - startedAt > 120_000) {
+        await failHostedRun({
+          supabase: params.supabase,
+          run,
+          refundCredits: true,
+          errorMessage:
+            "The direct text generation did not finish and had to be reset.",
+        });
+      }
+      continue;
+    }
+
+    const providerRequestId = run.provider_request_id?.trim() || null;
+    const providerEndpointId = String(
+      parseObjectJson(run.input_payload).provider_endpoint_id ?? ""
+    ).trim();
+
+    if (!providerRequestId || !providerEndpointId) {
+      const startedAt = run.started_at ? Date.parse(run.started_at) : Date.now();
+      if (
+        Date.now() - startedAt <
+        getStudioRunCompletionDelayMs({ kind: run.kind as GenerationRun["kind"] })
+      ) {
+        continue;
+      }
+
+      await failHostedRun({
+        supabase: params.supabase,
+        run,
+        refundCredits: true,
+        errorMessage:
+          "The queued provider request could not be recovered for this generation.",
+      });
+      continue;
+    }
+
+    try {
+      const { falKey } = getFalServerEnv();
+      const queueStatus = await getStudioFalQueueStatus({
+        falKey,
+        endpointId: providerEndpointId,
+        requestId: providerRequestId,
+      });
+      const normalizedStatus = String(queueStatus.status ?? "").toLowerCase();
+      const nextProviderStatus =
+        normalizedStatus === "completed"
+          ? "completed"
+          : normalizedStatus === "in_progress"
+            ? "running"
+            : "in_queue";
+
+      if (nextProviderStatus !== run.provider_status) {
+        await params.supabase
+          .from("generation_runs")
+          .update({
+            provider_status: nextProviderStatus,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", run.id)
+          .eq("user_id", run.user_id)
+          .eq("status", "processing");
+      }
+
+      if (normalizedStatus === "completed") {
+        const result = await getStudioFalQueuedResult({
+          falKey,
+          endpointId: providerEndpointId,
+          requestId: providerRequestId,
+        });
+
+        await completeHostedRunFromProviderPayload({
+          supabase: params.supabase,
+          run,
+          payload:
+            result && typeof result.data === "object" && result.data !== null
+              ? (result.data as Record<string, unknown>)
+              : {},
+        });
+        continue;
+      }
+    } catch (error) {
+      void error;
+    }
+  }
+
+  const refreshedRuns = await listHostedUserRuns(params.supabase, params.user.id);
+  await dispatchHostedQueuedRuns({
+    supabase: params.supabase,
+    userId: params.user.id,
+    systemConfig,
+    activeHostedUserCount,
+    runRows: refreshedRuns,
+    webhookBaseUrl: params.webhookBaseUrl,
+  });
+}
+
+export async function syncHostedQueueForUserId(params: {
+  supabase: HostedSupabaseClient;
+  userId: string;
+  webhookBaseUrl: string;
+}) {
+  const [systemConfig, activeHostedUserCount, runRows] = await Promise.all([
+    getHostedSystemConfig(params.supabase),
+    getActiveHostedUserCount(params.supabase),
+    listHostedUserRuns(params.supabase, params.userId),
+  ]);
+
+  await dispatchHostedQueuedRuns({
+    supabase: params.supabase,
+    userId: params.userId,
+    systemConfig,
+    activeHostedUserCount,
+    runRows,
+    webhookBaseUrl: params.webhookBaseUrl,
+  });
+}
+
+export async function handleHostedFalWebhook(params: {
+  supabase: HostedSupabaseClient;
+  requestId: string;
+  runId: string | null;
+  status: "OK" | "ERROR";
+  payload: Record<string, unknown>;
+  errorMessage: string | null;
+  webhookBaseUrl: string;
+}) {
+  const run =
+    (params.runId
+      ? await getHostedRunById(params.supabase, params.runId)
+      : null) ??
+    (await getHostedRunByProviderRequestId(params.supabase, params.requestId));
+
+  if (!run) {
+    throw new Error("The webhook referenced an unknown generation run.");
+  }
+
+  if (run.provider_request_id && run.provider_request_id !== params.requestId) {
+    throw new Error("The webhook request id did not match the stored generation run.");
+  }
+
+  if (run.status === "completed" || run.status === "failed" || run.status === "cancelled") {
+    return {
+      ok: true,
+      userId: run.user_id,
+      runId: run.id,
+      alreadyProcessed: true,
+    };
+  }
+
+  if (params.status === "OK") {
+    await completeHostedRunFromProviderPayload({
       supabase: params.supabase,
       run,
+      payload: params.payload,
+    });
+  } else {
+    await failHostedRun({
+      supabase: params.supabase,
+      run,
+      refundCredits: true,
+      errorMessage:
+        params.errorMessage ??
+        "Fal generation failed before an output asset was returned.",
     });
   }
 
-  void account;
+  await syncHostedQueueForUserId({
+    supabase: params.supabase,
+    userId: run.user_id,
+    webhookBaseUrl: params.webhookBaseUrl,
+  });
+
+  return {
+    ok: true,
+    userId: run.user_id,
+    runId: run.id,
+    alreadyProcessed: false,
+  };
 }
 
 export async function getHostedSyncPayload(params: {
   supabase: HostedSupabaseClient;
   user: User;
   sinceRevision: number | null;
+  webhookBaseUrl: string;
 }) {
   await syncHostedUserQueue({
     supabase: params.supabase,
     user: params.user,
+    webhookBaseUrl: params.webhookBaseUrl,
   });
 
   const nextState = await buildHostedState({
@@ -845,10 +1527,11 @@ export async function mutateHostedState(params: {
 
   switch (mutation.action) {
     case "set_enabled_models": {
+      const enabledModelIds = normalizeStudioEnabledModelIds(mutation.enabledModelIds);
       const { error } = await params.supabase
         .from("studio_accounts")
         .update({
-          enabled_model_ids: mutation.enabledModelIds,
+          enabled_model_ids: enabledModelIds,
         })
         .eq("user_id", params.user.id);
 
@@ -858,10 +1541,25 @@ export async function mutateHostedState(params: {
       break;
     }
     case "save_ui_state": {
+      const { data: account, error: accountError } = await params.supabase
+        .from("studio_accounts")
+        .select("enabled_model_ids")
+        .eq("user_id", params.user.id)
+        .single();
+
+      if (accountError || !account) {
+        throw new Error(accountError?.message ?? "Could not load the studio account.");
+      }
+
+      const enabledModelIds = normalizeStudioEnabledModelIds(account.enabled_model_ids);
+      const selectedModelId = resolveConfiguredStudioModelId({
+        currentModelId: mutation.selectedModelId,
+        enabledModelIds,
+      });
       const { error } = await params.supabase
         .from("studio_accounts")
         .update({
-          selected_model_id: mutation.selectedModelId,
+          selected_model_id: selectedModelId,
           gallery_size_level: mutation.gallerySizeLevel,
         })
         .eq("user_id", params.user.id);
@@ -885,6 +1583,7 @@ export async function mutateHostedState(params: {
       break;
     }
     case "rename_folder": {
+      await assertHostedFolderExists(params.supabase, params.user.id, mutation.folderId);
       const { error } = await params.supabase
         .from("folders")
         .update({
@@ -899,6 +1598,7 @@ export async function mutateHostedState(params: {
       break;
     }
     case "delete_folder": {
+      await assertHostedFolderExists(params.supabase, params.user.id, mutation.folderId);
       const { error: clearItemsError } = await params.supabase
         .from("library_items")
         .update({
@@ -978,6 +1678,7 @@ export async function mutateHostedState(params: {
       break;
     }
     case "move_items": {
+      await assertHostedFolderExists(params.supabase, params.user.id, mutation.folderId);
       const { error } = await params.supabase
         .from("library_items")
         .update({
@@ -994,26 +1695,21 @@ export async function mutateHostedState(params: {
     case "delete_items": {
       const itemRows = await listHostedUserItems(params.supabase, params.user.id);
       const targetItems = itemRows.filter((item) => mutation.itemIds.includes(item.id));
-      const hostedMediaPaths = targetItems
-        .map((item) => item.run_file_id)
+      const hostedRunFileIds = targetItems
+        .flatMap((item) => [item.run_file_id, item.thumbnail_file_id])
         .filter((value): value is string => Boolean(value));
 
-      if (hostedMediaPaths.length > 0) {
+      if (hostedRunFileIds.length > 0) {
         const runFileRows = await listHostedUserRunFiles(params.supabase, params.user.id);
         const filePaths = runFileRows
-          .filter((runFile) => hostedMediaPaths.includes(runFile.id) && runFile.storage_bucket === HOSTED_MEDIA_BUCKET)
+          .filter(
+            (runFile) =>
+              hostedRunFileIds.includes(runFile.id) &&
+              runFile.storage_bucket === HOSTED_MEDIA_BUCKET
+          )
           .map((runFile) => runFile.storage_path);
 
-        if (filePaths.length > 0) {
-          const { error: storageError } = await params.supabase
-            .storage
-            .from(HOSTED_MEDIA_BUCKET)
-            .remove(filePaths);
-
-          if (storageError) {
-            throw new Error(storageError.message);
-          }
-        }
+        await removeHostedStoragePaths(params.supabase, filePaths);
       }
 
       const { error: deleteItemsError } = await params.supabase
@@ -1026,6 +1722,26 @@ export async function mutateHostedState(params: {
         throw new Error(deleteItemsError.message);
       }
 
+      if (hostedRunFileIds.length > 0) {
+        const { error: deleteRunFilesError } = await params.supabase
+          .from("run_files")
+          .delete()
+          .eq("user_id", params.user.id)
+          .in("id", hostedRunFileIds);
+
+        if (deleteRunFilesError) {
+          throw new Error(deleteRunFilesError.message);
+        }
+      }
+
+      break;
+    }
+    case "delete_runs": {
+      await deleteHostedRuns({
+        supabase: params.supabase,
+        user: params.user,
+        runIds: mutation.runIds,
+      });
       break;
     }
     case "update_text_item": {
@@ -1051,11 +1767,12 @@ export async function mutateHostedState(params: {
       break;
     }
     case "create_text_item": {
+      await assertHostedFolderExists(params.supabase, params.user.id, mutation.folderId);
       const body = mutation.body.trim();
       const title = mutation.title.trim() || body.slice(0, 36) || "Text note";
       const now = new Date().toISOString();
       const { error } = await params.supabase.from("library_items").insert({
-        id: createStudioId("asset"),
+        id: createHostedUuid(),
         user_id: params.user.id,
         title,
         kind: "text",
@@ -1076,7 +1793,7 @@ export async function mutateHostedState(params: {
         aspect_ratio_label: null,
         has_alpha: false,
         folder_id: mutation.folderId,
-        file_name: `${createStudioId("text")}.txt`,
+        file_name: `${createHostedUuid()}.txt`,
         mime_type: "text/plain",
         byte_size: body.length,
         metadata: {} as Json,
@@ -1191,6 +1908,7 @@ export async function uploadHostedFiles(params: {
   }
 
   await ensureHostedAccount(params.supabase, params.user);
+  await assertHostedFolderExists(params.supabase, params.user.id, params.folderId);
   const createdAt = new Date().toISOString();
 
   for (const [index, file] of params.files.entries()) {
@@ -1204,77 +1922,87 @@ export async function uploadHostedFiles(params: {
       throw new Error(`Unsupported upload: ${file.name}`);
     }
 
-    const runFileId = createStudioId("run-file");
-    const storagePath = await uploadHostedStorageFile({
-      supabase: params.supabase,
-      userId: params.user.id,
-      runFileId,
-      file,
-    });
+    const runFileId = createHostedUuid();
+    let storagePath: string | null = null;
 
-    const { error: runFileError } = await params.supabase.from("run_files").insert({
-      id: runFileId,
-      run_id: null,
-      user_id: params.user.id,
-      file_role: "input",
-      source_type: "uploaded",
-      storage_bucket: HOSTED_MEDIA_BUCKET,
-      storage_path: storagePath,
-      mime_type: file.type || "application/octet-stream",
-      file_name: file.name,
-      file_size_bytes: file.size,
-      media_width: metadata.mediaWidth,
-      media_height: metadata.mediaHeight,
-      media_duration_seconds: metadata.mediaDurationSeconds,
-      aspect_ratio_label: metadata.aspectRatioLabel,
-      has_alpha: metadata.hasAlpha,
-      metadata: {} as Json,
-      created_at: createdAt,
-    });
+    try {
+      storagePath = await uploadHostedStorageFile({
+        supabase: params.supabase,
+        userId: params.user.id,
+        runFileId,
+        file,
+      });
 
-    if (runFileError) {
-      throw new Error(runFileError.message);
-    }
+      const { error: runFileError } = await params.supabase.from("run_files").insert({
+        id: runFileId,
+        run_id: null,
+        user_id: params.user.id,
+        file_role: "input",
+        source_type: "uploaded",
+        storage_bucket: HOSTED_MEDIA_BUCKET,
+        storage_path: storagePath,
+        mime_type: file.type || "application/octet-stream",
+        file_name: file.name,
+        file_size_bytes: file.size,
+        media_width: metadata.mediaWidth,
+        media_height: metadata.mediaHeight,
+        media_duration_seconds: metadata.mediaDurationSeconds,
+        aspect_ratio_label: metadata.aspectRatioLabel,
+        has_alpha: metadata.hasAlpha,
+        metadata: {} as Json,
+        created_at: createdAt,
+      });
 
-    const metaLabel =
-      kind === "audio"
-        ? `${file.type || "Audio"} • ${(file.size / 1024 / 1024).toFixed(1)} MB`
-        : `${file.type || "File"} • ${(file.size / 1024 / 1024).toFixed(1)} MB`;
+      if (runFileError) {
+        throw new Error(runFileError.message);
+      }
 
-    const { error: itemError } = await params.supabase.from("library_items").insert({
-      id: createStudioId("asset"),
-      user_id: params.user.id,
-      run_file_id: runFileId,
-      thumbnail_file_id: null,
-      source_run_id: null,
-      title: file.name,
-      kind,
-      source: "uploaded",
-      role: "uploaded_source",
-      content_text: null,
-      created_at: createdAt,
-      updated_at: createdAt,
-      model_id: null,
-      run_id: null,
-      provider: "fal",
-      status: "ready",
-      prompt: "",
-      meta: metaLabel,
-      media_width: metadata.mediaWidth,
-      media_height: metadata.mediaHeight,
-      media_duration_seconds: metadata.mediaDurationSeconds,
-      aspect_ratio_label: metadata.aspectRatioLabel,
-      has_alpha: metadata.hasAlpha,
-      folder_id: params.folderId,
-      file_name: file.name,
-      mime_type: file.type || null,
-      byte_size: file.size,
-      metadata: {} as Json,
-      error_message: null,
-    });
+      const metaLabel =
+        kind === "audio"
+          ? `${file.type || "Audio"} • ${(file.size / 1024 / 1024).toFixed(1)} MB`
+          : `${file.type || "File"} • ${(file.size / 1024 / 1024).toFixed(1)} MB`;
 
-    if (itemError) {
-      throw new Error(itemError.message);
+      const { error: itemError } = await params.supabase.from("library_items").insert({
+        id: createHostedUuid(),
+        user_id: params.user.id,
+        run_file_id: runFileId,
+        thumbnail_file_id: null,
+        source_run_id: null,
+        title: file.name,
+        kind,
+        source: "uploaded",
+        role: "uploaded_source",
+        content_text: null,
+        created_at: createdAt,
+        updated_at: createdAt,
+        model_id: null,
+        run_id: null,
+        provider: "fal",
+        status: "ready",
+        prompt: "",
+        meta: metaLabel,
+        media_width: metadata.mediaWidth,
+        media_height: metadata.mediaHeight,
+        media_duration_seconds: metadata.mediaDurationSeconds,
+        aspect_ratio_label: metadata.aspectRatioLabel,
+        has_alpha: metadata.hasAlpha,
+        folder_id: params.folderId,
+        file_name: file.name,
+        mime_type: file.type || null,
+        byte_size: file.size,
+        metadata: {} as Json,
+        error_message: null,
+      });
+
+      if (itemError) {
+        throw new Error(itemError.message);
+      }
+    } catch (error) {
+      await params.supabase.from("run_files").delete().eq("id", runFileId).eq("user_id", params.user.id);
+      if (storagePath) {
+        await params.supabase.storage.from(HOSTED_MEDIA_BUCKET).remove([storagePath]).catch(() => undefined);
+      }
+      throw error;
     }
   }
 
@@ -1297,12 +2025,14 @@ export async function queueHostedGeneration(params: {
   draft: GenerationRun["draftSnapshot"] | PersistedStudioDraft;
   inputs: HostedStudioGenerateInputDescriptor[];
   uploadedFiles: Map<string, File>;
+  webhookBaseUrl: string;
 }) {
   const [account, systemConfig] = await Promise.all([
     ensureHostedAccount(params.supabase, params.user),
     getHostedSystemConfig(params.supabase),
   ]);
-  const enabledModelIds = account.enabled_model_ids;
+  await assertHostedFolderExists(params.supabase, params.user.id, params.folderId);
+  const enabledModelIds = normalizeStudioEnabledModelIds(account.enabled_model_ids);
 
   if (!enabledModelIds.includes(params.modelId)) {
     throw new Error("That model is disabled for this workspace.");
@@ -1329,6 +2059,35 @@ export async function queueHostedGeneration(params: {
     ...toPersistedDraft(createDraft(model)),
     ...params.draft,
   };
+  const referencedAssetIds = Array.from(
+    new Set(
+      params.inputs
+        .map((input) => input.originAssetId?.trim() || null)
+        .filter((value): value is string => Boolean(value))
+    )
+  );
+  const referencedAssetKinds = new Map<string, LibraryItemKind>();
+  if (referencedAssetIds.length > 0) {
+    const { data: referencedItems, error: referencedItemsError } = await params.supabase
+      .from("library_items")
+      .select("id, kind")
+      .eq("user_id", params.user.id)
+      .in("id", referencedAssetIds);
+
+    if (referencedItemsError) {
+      throw new Error(referencedItemsError.message);
+    }
+
+    for (const item of referencedItems ?? []) {
+      referencedAssetKinds.set(item.id, item.kind as LibraryItemKind);
+    }
+  }
+  validateStudioGenerationRequest({
+    modelId: model.id,
+    draft: persistedDraft,
+    inputs: params.inputs,
+    referencedAssetKinds,
+  });
   const hydratedDraft = hydrateDraft(persistedDraft, model);
   const requestMode = resolveStudioGenerationRequestMode(model, hydratedDraft);
   const referenceCount = params.inputs.filter((entry) => entry.slot === "reference").length;
@@ -1341,7 +2100,7 @@ export async function queueHostedGeneration(params: {
   }
 
   const createdAt = new Date().toISOString();
-  const runId = createStudioId("run");
+  const runId = createHostedUuid();
   const previewUrl = createGenerationRunPreviewUrl(model, hydratedDraft);
 
   const runInsert: Database["public"]["Tables"]["generation_runs"]["Row"] = {
@@ -1351,7 +2110,7 @@ export async function queueHostedGeneration(params: {
     model_id: model.id,
     model_name: model.name,
     kind: model.kind,
-    provider: "fal",
+    provider: model.provider,
     request_mode: requestMode,
     status: "queued",
     prompt: persistedDraft.prompt,
@@ -1404,100 +2163,146 @@ export async function queueHostedGeneration(params: {
     },
   };
 
-  const { error: runInsertError } = await params.supabase
-    .from("generation_runs")
-    .insert(runInsert);
+  const createdStoragePaths: string[] = [];
+  const createdRunFileIds: string[] = [];
+  let holdApplied = false;
 
-  if (runInsertError) {
-    throw new Error(runInsertError.message);
-  }
+  try {
+    const { error: runInsertError } = await params.supabase
+      .from("generation_runs")
+      .insert(runInsert);
 
-  let inputPosition = 0;
-  for (const input of params.inputs) {
-    let runFileId: string | null = null;
-    const libraryItemId: string | null = input.originAssetId;
+    if (runInsertError) {
+      throw new Error(runInsertError.message);
+    }
 
-    if (!libraryItemId && input.uploadField) {
-      const uploadedFile = params.uploadedFiles.get(input.uploadField);
-      if (!uploadedFile) {
-        throw new Error("A generation input file was missing.");
+    let inputPosition = 0;
+    for (const input of params.inputs) {
+      let runFileId: string | null = null;
+      const libraryItemId: string | null = input.originAssetId;
+
+      if (!libraryItemId && input.uploadField) {
+        const uploadedFile = params.uploadedFiles.get(input.uploadField);
+        if (!uploadedFile) {
+          throw new Error("A generation input file was missing.");
+        }
+
+        runFileId = createHostedUuid();
+        const storagePath = await uploadHostedStorageFile({
+          supabase: params.supabase,
+          userId: params.user.id,
+          runFileId,
+          file: uploadedFile,
+        });
+        createdStoragePaths.push(storagePath);
+        createdRunFileIds.push(runFileId);
+
+        const { error: runFileError } = await params.supabase.from("run_files").insert({
+          id: runFileId,
+          run_id: runId,
+          user_id: params.user.id,
+          file_role: "input",
+          source_type: "uploaded",
+          storage_bucket: HOSTED_MEDIA_BUCKET,
+          storage_path: storagePath,
+          mime_type: uploadedFile.type || input.mimeType || "application/octet-stream",
+          file_name: uploadedFile.name,
+          file_size_bytes: uploadedFile.size,
+          media_width: null,
+          media_height: null,
+          media_duration_seconds: null,
+          aspect_ratio_label: null,
+          has_alpha: false,
+          metadata: {
+            input_slot: input.slot,
+            source: input.source,
+          } as Json,
+          created_at: createdAt,
+        });
+
+        if (runFileError) {
+          throw new Error(runFileError.message);
+        }
       }
 
-      runFileId = createStudioId("run-file");
-      const storagePath = await uploadHostedStorageFile({
+      const { error: inputError } = await params.supabase
+        .from("generation_run_inputs")
+        .insert({
+          user_id: params.user.id,
+          run_id: runId,
+          input_role:
+            input.slot === "start_frame"
+              ? "start_frame"
+              : input.slot === "end_frame"
+                ? "end_frame"
+                : "reference",
+          position: inputPosition,
+          library_item_id: libraryItemId,
+          run_file_id: runFileId,
+        });
+
+      if (inputError) {
+        throw new Error(inputError.message);
+      }
+      inputPosition += 1;
+    }
+
+    await applyHostedCreditLedgerEntry({
+      supabase: params.supabase,
+      userId: params.user.id,
+      deltaCredits: -pricingQuote.billedCredits,
+      reason: "generation_hold",
+      relatedRunId: runId,
+      idempotencyKey: `generation:${runId}:hold`,
+      sourceEventId: `generation_run:${runId}:hold`,
+      metadata: {
+        model_id: model.id,
+        request_mode: requestMode,
+      },
+    });
+    holdApplied = true;
+  } catch (error) {
+    await params.supabase
+      .from("generation_run_inputs")
+      .delete()
+      .eq("run_id", runId)
+      .eq("user_id", params.user.id);
+    if (createdRunFileIds.length > 0) {
+      await params.supabase
+        .from("run_files")
+        .delete()
+        .eq("user_id", params.user.id)
+        .in("id", createdRunFileIds);
+    }
+    await params.supabase
+      .from("generation_runs")
+      .delete()
+      .eq("id", runId)
+      .eq("user_id", params.user.id);
+    if (createdStoragePaths.length > 0) {
+      await params.supabase.storage.from(HOSTED_MEDIA_BUCKET).remove(createdStoragePaths).catch(() => undefined);
+    }
+    if (holdApplied) {
+      await applyHostedCreditLedgerEntry({
         supabase: params.supabase,
         userId: params.user.id,
-        runFileId,
-        file: uploadedFile,
-      });
-
-      const { error: runFileError } = await params.supabase.from("run_files").insert({
-        id: runFileId,
-        run_id: runId,
-        user_id: params.user.id,
-        file_role: "input",
-        source_type: "uploaded",
-        storage_bucket: HOSTED_MEDIA_BUCKET,
-        storage_path: storagePath,
-        mime_type: uploadedFile.type || input.mimeType || "application/octet-stream",
-        file_name: uploadedFile.name,
-        file_size_bytes: uploadedFile.size,
-        media_width: null,
-        media_height: null,
-        media_duration_seconds: null,
-        aspect_ratio_label: null,
-        has_alpha: false,
+        deltaCredits: pricingQuote.billedCredits,
+        reason: "generation_refund",
+        relatedRunId: runId,
+        idempotencyKey: `generation:${runId}:setup_refund`,
+        sourceEventId: `generation_run:${runId}:setup_failed`,
         metadata: {
-          input_slot: input.slot,
-          source: input.source,
-        } as Json,
-        created_at: createdAt,
-      });
-
-      if (runFileError) {
-        throw new Error(runFileError.message);
-      }
+          status: "failed_setup",
+        },
+      }).catch(() => undefined);
     }
-
-    const { error: inputError } = await params.supabase
-      .from("generation_run_inputs")
-      .insert({
-        user_id: params.user.id,
-        run_id: runId,
-        input_role:
-          input.slot === "start_frame"
-            ? "start_frame"
-            : input.slot === "end_frame"
-              ? "end_frame"
-              : "reference",
-        position: inputPosition,
-        library_item_id: libraryItemId,
-        run_file_id: runFileId,
-      });
-
-    if (inputError) {
-      throw new Error(inputError.message);
-    }
-    inputPosition += 1;
+    throw error;
   }
-
-  await applyHostedCreditLedgerEntry({
-    supabase: params.supabase,
-    userId: params.user.id,
-    deltaCredits: -pricingQuote.billedCredits,
-    reason: "generation_hold",
-    relatedRunId: runId,
-    idempotencyKey: `generation:${runId}:hold`,
-    sourceEventId: `generation_run:${runId}:hold`,
-    metadata: {
-      model_id: model.id,
-      request_mode: requestMode,
-    },
-  });
 
   await syncHostedUserQueue({
     supabase: params.supabase,
     user: params.user,
+    webhookBaseUrl: params.webhookBaseUrl,
   });
 
   const nextState = await buildHostedState({
@@ -1515,39 +2320,51 @@ export async function deleteHostedAccount(params: {
   supabase: HostedSupabaseClient;
   user: User;
 }) {
-  const { data: storageEntries, error: storageListError } = await params.supabase
-    .storage
-    .from(HOSTED_MEDIA_BUCKET)
-    .list(params.user.id, {
-      limit: 1000,
-    });
+  const adminSupabase = createSupabaseAdminClient();
+  const { data: runFiles, error: runFilesError } = await adminSupabase
+    .from("run_files")
+    .select("storage_bucket, storage_path")
+    .eq("user_id", params.user.id)
+    .eq("storage_bucket", HOSTED_MEDIA_BUCKET);
 
-  if (storageListError) {
-    throw new Error(storageListError.message);
+  if (runFilesError) {
+    throw new Error(runFilesError.message);
   }
 
-  const filePaths = (storageEntries ?? [])
-    .map((entry) => (entry.name ? `${params.user.id}/${entry.name}` : null))
+  const hostedStoragePaths = (runFiles ?? [])
+    .map((file) => file.storage_path?.trim() || null)
     .filter((value): value is string => Boolean(value));
 
-  if (filePaths.length > 0) {
-    const { error: storageDeleteError } = await params.supabase
-      .storage
+  if (hostedStoragePaths.length > 0) {
+    const { error: storageDeleteError } = await adminSupabase.storage
       .from(HOSTED_MEDIA_BUCKET)
-      .remove(filePaths);
+      .remove(hostedStoragePaths);
 
     if (storageDeleteError) {
       throw new Error(storageDeleteError.message);
     }
   }
 
-  const { error } = await params.supabase
-    .from("studio_accounts")
+  const { error: feedbackDeleteError } = await adminSupabase
+    .from("feedback_submissions")
     .delete()
     .eq("user_id", params.user.id);
 
-  if (error) {
-    throw new Error(error.message);
+  if (feedbackDeleteError) {
+    throw new Error(feedbackDeleteError.message);
+  }
+
+  await deleteHostedBillingCustomersForUser({
+    supabase: adminSupabase,
+    userId: params.user.id,
+  });
+
+  const { error: deleteUserError } = await adminSupabase.auth.admin.deleteUser(
+    params.user.id
+  );
+
+  if (deleteUserError) {
+    throw new Error(deleteUserError.message);
   }
 }
 

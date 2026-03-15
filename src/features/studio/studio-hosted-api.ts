@@ -95,6 +95,10 @@ export type HostedStudioMutation =
       itemIds: string[];
     }
   | {
+      action: "delete_runs";
+      runIds: string[];
+    }
+  | {
       action: "update_text_item";
       itemId: string;
       title?: string;

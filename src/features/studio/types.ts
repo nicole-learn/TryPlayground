@@ -1,6 +1,17 @@
 export type StudioModelKind = "image" | "video" | "text" | "audio";
 export type StudioModelSection = "images" | "videos" | "text" | "audio";
 export type StudioCreditPurchaseAmount = 100;
+export type StudioWorkspaceProvider =
+  | "fal"
+  | "openai"
+  | "anthropic"
+  | "google";
+export type StudioProviderKeyId =
+  | "fal"
+  | "openai"
+  | "anthropic"
+  | "gemini";
+export type StudioTextModelFamilyId = "claude" | "chatgpt" | "gemini";
 export type StudioRunStatus =
   | "pending"
   | "queued"
@@ -10,7 +21,6 @@ export type StudioRunStatus =
   | "cancelled";
 export type LibraryItemSource = "generated" | "uploaded";
 export type LibraryItemKind = StudioModelKind;
-export type StudioWorkspaceProvider = "fal";
 export type StudioAssetStatus = "ready" | "processing" | "failed";
 export type StudioGenerationRequestMode =
   | "text-to-image"
@@ -72,9 +82,13 @@ export type StudioModelPricing =
 export interface StudioModelDefinition {
   id: string;
   name: string;
+  provider: StudioWorkspaceProvider;
   providerLabel: string;
   kind: StudioModelKind;
   section: StudioModelSection;
+  familyId?: StudioTextModelFamilyId;
+  apiModelId?: string;
+  maxOutputTokens?: number;
   description: string;
   heroGradient: string;
   tags: string[];
@@ -197,7 +211,6 @@ export interface LibraryItem {
   aspectRatioLabel: string | null;
   hasAlpha: boolean;
   folderId: string | null;
-  folderIds: string[];
   storageBucket: string;
   storagePath: string | null;
   thumbnailPath: string | null;
@@ -305,7 +318,19 @@ export interface StudioModelConfiguration {
 
 export interface StudioProviderSettings {
   falApiKey: string;
-  lastValidatedAt: string | null;
+  falLastValidatedAt: string | null;
+  openaiApiKey: string;
+  openaiLastValidatedAt: string | null;
+  anthropicApiKey: string;
+  anthropicLastValidatedAt: string | null;
+  geminiApiKey: string;
+  geminiLastValidatedAt: string | null;
+}
+
+export interface StudioModelConfigurationEntry {
+  id: string;
+  label: string;
+  modelIds: string[];
 }
 
 export interface StudioProviderSaveResult {

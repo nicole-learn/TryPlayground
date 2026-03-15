@@ -1,13 +1,13 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { CreateTextDialog } from "./create-text-dialog";
-import { FeedbackDialog } from "./feedback-dialog";
 import { FolderDeleteDialog } from "./folder-delete-dialog";
 import { FolderDialog } from "./folder-dialog";
 import { HostedAuthDialog } from "./hosted-auth-dialog";
 import { ModalShell } from "./modal-shell";
 import { QueueLimitDialog } from "./queue-limit-dialog";
+import { StudioFeedbackDialog } from "./studio-feedback-dialog";
 import { StudioMessageDialog } from "./studio-message-dialog";
 
 describe("studio dialogs", () => {
@@ -27,30 +27,6 @@ describe("studio dialogs", () => {
 
     await user.click(dialog.parentElement as HTMLElement);
     expect(onClose).toHaveBeenCalledTimes(2);
-  });
-
-  it("submits feedback and focuses the textarea", async () => {
-    const user = userEvent.setup();
-    const onSubmit = vi.fn();
-    const onMessageChange = vi.fn();
-
-    render(
-      <FeedbackDialog
-        errorMessage={null}
-        message="Great work"
-        open
-        pending={false}
-        onClose={vi.fn()}
-        onMessageChange={onMessageChange}
-        onSubmit={onSubmit}
-      />
-    );
-
-    const textarea = screen.getByPlaceholderText("Tell us what you think.");
-    await waitFor(() => expect(textarea).toHaveFocus());
-    await user.click(screen.getByRole("button", { name: "Leave Feedback" }));
-
-    expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 
   it("submits the create prompt dialog with Ctrl+Enter", async () => {
@@ -104,8 +80,11 @@ describe("studio dialogs", () => {
     const user = userEvent.setup();
     const onDelete = vi.fn();
     const onCloseMessage = vi.fn();
+    const onCloseHostedAuth = vi.fn();
     const onContinue = vi.fn();
     const onCloseQueue = vi.fn();
+    const onFeedbackSubmit = vi.fn();
+    const onFeedbackMessageChange = vi.fn();
 
     const { rerender } = render(
       <FolderDeleteDialog
@@ -124,11 +103,14 @@ describe("studio dialogs", () => {
         errorMessage={null}
         open
         pending={false}
+        onClose={onCloseHostedAuth}
         onContinue={onContinue}
       />
     );
     await user.click(screen.getByRole("button", { name: "Continue with Google" }));
     expect(onContinue).toHaveBeenCalledTimes(1);
+    await user.keyboard("{Escape}");
+    expect(onCloseHostedAuth).toHaveBeenCalledTimes(1);
 
     rerender(
       <QueueLimitDialog open onClose={onCloseQueue} />
@@ -146,5 +128,22 @@ describe("studio dialogs", () => {
     );
     await user.click(screen.getByRole("button", { name: "Close" }));
     expect(onCloseMessage).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <StudioFeedbackDialog
+        errorMessage={null}
+        message="This is helpful."
+        open
+        pending={false}
+        successMessage={null}
+        onClose={vi.fn()}
+        onMessageChange={onFeedbackMessageChange}
+        onSubmit={onFeedbackSubmit}
+      />
+    );
+    await user.type(screen.getByPlaceholderText("Write your feedback here."), " More");
+    await user.click(screen.getByRole("button", { name: "Send Feedback" }));
+    expect(onFeedbackMessageChange).toHaveBeenCalled();
+    expect(onFeedbackSubmit).toHaveBeenCalledTimes(1);
   });
 });

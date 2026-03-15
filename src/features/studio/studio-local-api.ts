@@ -1,6 +1,8 @@
 import type {
   PersistedStudioDraft,
+  StudioReferenceInputKind,
   StudioWorkspaceSnapshot,
+  DraftReferenceSource,
 } from "./types";
 
 export interface LocalStudioSnapshotResponse {
@@ -26,6 +28,16 @@ export interface LocalStudioUploadManifestEntry {
   mediaDurationSeconds: number | null;
   aspectRatioLabel: string | null;
   hasAlpha: boolean;
+}
+
+export interface LocalStudioGenerateInputDescriptor {
+  slot: "reference" | "start_frame" | "end_frame";
+  uploadField: string | null;
+  originAssetId: string | null;
+  title: string;
+  kind: StudioReferenceInputKind;
+  mimeType: string | null;
+  source: DraftReferenceSource;
 }
 
 export type LocalStudioMutation =
@@ -65,6 +77,10 @@ export type LocalStudioMutation =
   | {
       action: "delete_items";
       itemIds: string[];
+    }
+  | {
+      action: "delete_runs";
+      runIds: string[];
     }
   | {
       action: "update_text_item";

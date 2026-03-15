@@ -13,7 +13,7 @@ These rules should hold across the product unless there is an explicit future pr
 ### Hard user limit
 
 - every user can have at most 100 active jobs at one time
-- `active jobs` means anything in `queued`, `dispatching`, or `generating`
+- `active jobs` means anything in `pending`, `queued`, or `processing`
 - completed, failed, and cancelled jobs do not count toward the limit
 - this cap applies in both hosted and local mode
 
@@ -109,7 +109,7 @@ Supabase Queues / `pgmq` can still be useful for internal wakeups or later batch
 Recommended platform primitives:
 
 - Postgres tables as the authoritative queue state
-- Supabase Realtime for live UI updates on job state changes
+- app-owned SSE streams for live UI updates on job state changes
 - Supabase Edge Functions for dispatching, reconciliation, and Fal callbacks/polling
 - `pg_cron` for periodic recovery and safety sweeps
 - optional `pg_net` or direct Edge Function invocation to wake the dispatcher immediately after enqueue, completion, or cancel events
@@ -118,7 +118,7 @@ This is aligned with official Supabase primitives that exist today:
 
 - Supabase Queues / `pgmq` for durable queue semantics and visibility windows
 - `pg_cron` for scheduled jobs
-- Realtime for low-latency state updates
+- SSE for low-latency state updates
 
 ## Hosted Queue Objects
 
@@ -147,7 +147,7 @@ Recommended fields:
 - `provider_status`
 - `output_asset_id`
 - `quoted_credit_cost`
-- `credit_hold_id`
+- `charged_credits`
 - `dispatch_attempt_count`
 - `dispatch_lease_expires_at`
 - `last_reconciled_at`
@@ -158,9 +158,9 @@ Recommended fields:
 
 Recommended internal statuses:
 
+- `pending`
 - `queued`
-- `dispatching`
-- `generating`
+- `processing`
 - `completed`
 - `failed`
 - `cancelled`
@@ -213,9 +213,9 @@ Recommended fields:
 
 Whatever final billing schema TryPlayground uses, it must support:
 
-- a hold when a hosted job enters the queue
-- release of that hold if the queued job is cancelled before provider acceptance
-- conversion of that hold into a finalized charge once the provider accepts the generation
+- immediate charge at enqueue time
+- refund if a queued job is cancelled before provider acceptance
+- refund if the provider setup or generation fails before a usable output is produced
 
 ## Hosted Lifecycle
 
@@ -224,11 +224,11 @@ Whatever final billing schema TryPlayground uses, it must support:
 When the user clicks Generate in hosted mode:
 
 1. Start a transaction.
-2. Count the user's active jobs in `queued`, `dispatching`, and `generating`.
+2. Count the user's active jobs in `pending`, `queued`, and `processing`.
 3. If the count is already 100, reject immediately and return the limit popup message.
 4. Compute the quoted credit cost using the current pricing table.
 5. Verify the user has enough spendable credits.
-6. Create a credit hold for the quoted amount.
+6. Charge the quoted credit amount immediately.
 7. Insert the `generation_jobs` row in `queued`.
 8. Commit.
 9. Notify the dispatcher and stream the new row to the UI.
@@ -236,7 +236,7 @@ When the user clicks Generate in hosted mode:
 Important:
 
 - the job does not exist if the limit check fails
-- the credit hold happens at enqueue, not later
+- the hosted charge happens at enqueue, not later
 - the queued job now counts against the 100-job cap
 
 ### Step 2. Dispatch claim
@@ -249,27 +249,27 @@ Claim flow:
 2. Compute available provider slots.
 3. Choose which users should receive those slots using the fair-share algorithm below.
 4. Claim the chosen jobs with row locking.
-5. Move those rows from `queued` to `dispatching`.
+5. Move those rows from `queued` to `processing`.
 6. Set a short dispatch lease expiry.
 7. Release the transaction.
 8. Submit to Fal.
 
-`dispatching` is an internal protection state. It prevents the same queued job from being claimed twice while a provider request is being created.
+`pending` can still exist internally for short-lived transitional work, but `processing` is the main in-flight state once a provider request has started.
 
 ### Step 3. Provider acceptance
 
 If Fal accepts the request:
 
 - store `provider_request_id`
-- move the job from `dispatching` to `generating`
+- keep the job in `processing`
 - clear the dispatch lease
-- finalize the credit hold into a real charge
+- keep the already-charged quoted amount as the final charge unless a later failure triggers a refund
 - emit the UI update
 
 If Fal rejects the request before acceptance:
 
 - either requeue with retry backoff or fail terminally depending on the error class
-- release any hold if the request never became a real provider job
+- refund the already-charged amount if the request never became a real provider job
 
 ### Step 4. Completion
 
@@ -302,7 +302,7 @@ This is equal-weight fair sharing.
 ## Definitions
 
 - `slot_limit`: current global provider concurrency, initially 30
-- `running_count`: total jobs in `dispatching` or `generating`
+- `running_count`: total jobs in `processing`
 - `free_slots = slot_limit - running_count`
 - `active users`: users with at least one queued job or at least one running job
 
@@ -402,8 +402,7 @@ This is the behavior TryPlayground wants.
 
 ### Not allowed
 
-- `dispatching` jobs cannot be cancelled from the UI
-- `generating` jobs cannot be cancelled from the UI
+- `processing` jobs cannot be cancelled from the UI
 
 ### Why this boundary matters
 
@@ -446,15 +445,15 @@ This is essential to avoid duplicate generations and accidental double charging.
 
 ### Stale dispatch recovery
 
-If a job remains in `dispatching` past its dispatch lease:
+If a job remains in `pending` past its dispatch lease:
 
 - a sweeper should inspect it
 - if no provider request id exists, move it back to `queued`
 - if a provider request id exists, reconcile provider state before changing anything
 
-### Stale generating recovery
+### Stale processing recovery
 
-If a job remains in `generating` too long:
+If a job remains in `processing` too long:
 
 - reconcile with provider status
 - if provider reports completion, finish the job
@@ -469,7 +468,7 @@ Recommended safety jobs:
 
 - `dispatch-sweeper` every 5 seconds
 - `stale-dispatch-recovery` every 10 seconds
-- `stale-generating-reconciliation` every 15 to 30 seconds
+- `stale-processing-reconciliation` every 15 to 30 seconds
 
 These are lightweight control-plane jobs, not long-running workers.
 
@@ -488,18 +487,18 @@ Hosted credits must be part of the queue design.
 
 - reserve credits at enqueue
 - finalize the charge when the provider accepts the job
-- release the hold if the queued job is cancelled before provider acceptance
+- refund the charge if the queued job is cancelled before provider acceptance
 
 This prevents a user from queueing more work than they can pay for while avoiding charges for work that never really started.
 
 ## Realtime UI Updates
 
-Hosted UI updates should come from Realtime-backed job changes, not from guesswork in the client.
+Hosted UI updates should come from SSE-backed job changes, not from guesswork in the client.
 
 The UI should update immediately when a job changes:
 
 - queued
-- generating
+- processing
 - completed
 - failed
 - cancelled
@@ -515,7 +514,7 @@ Local mode needs the same product rules but does not need the hosted fairness ma
 - same 100 active-job cap
 - same limit popup
 - queued jobs are cancellable
-- generating jobs are not cancellable from the UI
+- processing jobs are not cancellable from the UI
 
 ## Local scheduler
 
@@ -527,7 +526,7 @@ Recommended local behavior:
 
 Recommended v1 default:
 
-- local dispatch cap of 3 simultaneously generating jobs
+- local dispatch cap of 3 simultaneously processing jobs
 
 Reason:
 
@@ -557,7 +556,7 @@ Local mode can be simpler, but it should still be decent:
 ### Phase 2
 
 - build hosted authoritative `generation_jobs`
-- add credit holds
+- add immediate charge and refund accounting
 - add fair-share dispatcher
 - add Realtime UI updates
 

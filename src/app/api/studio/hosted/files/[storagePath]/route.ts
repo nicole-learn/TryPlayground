@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSupabaseUser } from "@/lib/supabase/server";
 import { downloadHostedFile } from "@/server/studio/hosted-store";
+import { toStudioErrorResponse } from "@/server/studio/studio-route-errors";
 
 export const runtime = "nodejs";
 
@@ -20,14 +21,10 @@ export async function GET(
       headers: {
         "Cache-Control": "private, max-age=31536000, immutable",
         "Content-Type": blob.type || "application/octet-stream",
+        Vary: "Cookie, Authorization",
       },
     });
   } catch (error) {
-    return NextResponse.json(
-      {
-        error: error instanceof Error ? error.message : "Could not load hosted file.",
-      },
-      { status: 404 }
-    );
+    return toStudioErrorResponse(error, "Could not load hosted file.", 404);
   }
 }

@@ -1,6 +1,6 @@
 # TryPlayground
 
-TryPlayground is a clean, Fal-powered AI studio for text, image, video, speech, and background-removal generation.
+TryPlayground is a clean AI studio for text, image, video, speech, and background-removal generation.
 
 It is designed to feel simple from the first minute:
 
@@ -11,8 +11,8 @@ It is designed to feel simple from the first minute:
 
 TryPlayground comes in two versions:
 
-- `Open Source / Local`: run it on your own computer with your own Fal API key
-- `Hosted`: use the same interface without managing your own key, powered by credits
+- `Open Source / Local`: run it on your own computer with your own provider API keys
+- `Hosted`: use the same interface with server-managed provider keys, powered by credits
 
 ## What You Can Do
 
@@ -33,10 +33,10 @@ TryPlayground comes in two versions:
 The open-source version is for people who want full control.
 
 - run TryPlayground locally on your own machine
-- connect your own Fal API key inside the app
+- connect your own provider API keys inside the app
 - keep your files, history, and folders local
 - use the same studio UI as the hosted version
-- pay Fal directly under your own account
+- pay providers directly under your own accounts
 
 Best for:
 
@@ -50,9 +50,10 @@ Best for:
 The hosted version is for people who want the simplest possible setup.
 
 - sign in and start using TryPlayground right away
-- no API key required
+- no API key setup required
+- new accounts start with 5 free credits
 - credits are purchased in packs of 100
-- generation is billed from current Fal market pricing plus a 25% platform markup
+- generation is billed from current Fal market pricing plus a 15% platform markup
 - account, credits, and billing are available from the profile menu
 
 Best for:
@@ -96,14 +97,14 @@ Then:
 
 1. Open the app locally.
 2. Open Provider Settings.
-3. Paste in your Fal API key.
+3. Paste in the provider API key you need for the models you want to use.
 4. Start generating.
 
 ## Hosted Pricing
 
 - credits are sold in packs of 100 only
 - 100 credits = $10
-- each hosted run is priced from current Fal market cost plus 25%
+- each hosted run is priced from current Fal market cost plus 15%
 - credits do not expire
 
 This keeps pricing transparent and easy to understand.
@@ -112,8 +113,8 @@ This keeps pricing transparent and easy to understand.
 
 ### Open Source / Local
 
-- your Fal key belongs to you
-- your Fal key is kept only for the current browser session
+- your provider keys belong to you
+- your provider keys are kept only for the current browser session
 - your local files stay on your machine
 - your history and folders are stored locally
 

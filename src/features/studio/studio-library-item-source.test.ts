@@ -1,13 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { loadUploadedAssetFile } = vi.hoisted(() => ({
-  loadUploadedAssetFile: vi.fn(),
-}));
-
-vi.mock("./studio-browser-storage", () => ({
-  loadUploadedAssetFile,
-}));
-
 import {
   getLibraryItemDownloadFileName,
   getLibraryItemFallbackMimeType,
@@ -57,7 +49,6 @@ function createItem(
 
 describe("studio-library-item-source", () => {
   beforeEach(() => {
-    loadUploadedAssetFile.mockReset();
     vi.restoreAllMocks();
   });
 
@@ -85,12 +76,6 @@ describe("studio-library-item-source", () => {
   it("resolves source urls across storage backends", () => {
     expect(
       getLibraryItemSourceUrl(
-        createItem({ storageBucket: "browser-upload", previewUrl: "blob:asset" })
-      )
-    ).toBeNull();
-
-    expect(
-      getLibraryItemSourceUrl(
         createItem({ storageBucket: "local-fs", previewUrl: "/api/studio/local/files/file-1" })
       )
     ).toBe("/api/studio/local/files/file-1");
@@ -111,22 +96,6 @@ describe("studio-library-item-source", () => {
 
     expect(await blob?.text()).toBe("Hello world");
     expect(blob?.type).toBe("text/plain");
-  });
-
-  it("loads browser-upload assets from the browser storage helper", async () => {
-    const file = new Blob(["audio-bytes"], { type: "audio/mpeg" });
-    loadUploadedAssetFile.mockResolvedValue(file);
-
-    const result = await readLibraryItemSourceBlob(
-      createItem({
-        kind: "audio",
-        storageBucket: "browser-upload",
-        storagePath: "uploads/audio-1",
-      })
-    );
-
-    expect(loadUploadedAssetFile).toHaveBeenCalledWith("uploads/audio-1");
-    expect(result).toBe(file);
   });
 
   it("fetches hosted or direct source urls when needed", async () => {

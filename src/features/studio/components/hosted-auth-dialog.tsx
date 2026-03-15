@@ -7,6 +7,7 @@ interface HostedAuthDialogProps {
   errorMessage: string | null;
   open: boolean;
   pending: boolean;
+  onClose: () => void;
   onContinue: () => Promise<void> | void;
 }
 
@@ -14,14 +15,14 @@ export function HostedAuthDialog({
   errorMessage,
   open,
   pending,
+  onClose,
   onContinue,
 }: HostedAuthDialogProps) {
   return (
     <ModalShell
       open={open}
       title="Sign in with Google"
-      description="Continue with your Google account to use the hosted TryPlayground workspace."
-      onClose={() => {}}
+      onClose={onClose}
       panelClassName="max-w-md rounded-[30px]"
     >
       <div className="space-y-5">

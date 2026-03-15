@@ -33,10 +33,6 @@ export function StudioDevModeOverlay({
 }: StudioDevModeOverlayProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
-  const [hovered, setHovered] = useState(false);
-  const [focused, setFocused] = useState(false);
-
-  const expanded = hovered || focused || open;
 
   useEffect(() => {
     if (!open) {
@@ -69,14 +65,6 @@ export function StudioDevModeOverlay({
       <div
         ref={containerRef}
         className="pointer-events-auto relative"
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-        onFocus={() => setFocused(true)}
-        onBlur={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-            setFocused(false);
-          }
-        }}
       >
         {open ? (
           <div className="animate-in fade-in slide-in-from-bottom-2 absolute bottom-full left-0 mb-2 w-[280px] overflow-hidden rounded-2xl border border-white/10 bg-black/88 p-2 shadow-[0_20px_50px_rgba(0,0,0,0.45)] backdrop-blur-2xl">
@@ -138,38 +126,17 @@ export function StudioDevModeOverlay({
           aria-label="Toggle dev mode switcher"
           aria-expanded={open}
           title="Dev mode"
-          className={cn(
-            "flex h-11 items-center overflow-hidden rounded-full border border-white/10 bg-black/88 text-white shadow-[0_12px_36px_rgba(0,0,0,0.34)] backdrop-blur-2xl transition-[width,background-color,border-color,box-shadow,transform] duration-200 hover:bg-black/92 active:scale-[0.98]",
-            expanded ? "w-[176px]" : "w-11"
-          )}
+          className="flex size-11 items-center justify-center rounded-full border border-white/10 bg-black/88 text-white shadow-[0_12px_36px_rgba(0,0,0,0.34)] backdrop-blur-2xl transition-[background-color,border-color,box-shadow,transform] duration-200 hover:bg-black/92 active:scale-[0.98]"
         >
-          <span className="flex size-11 shrink-0 items-center justify-center">
+          <span className="flex size-11 items-center justify-center">
             <SquareTerminal className="size-[17px] text-white/92" />
           </span>
-
-          <span
+          <ChevronUp
             className={cn(
-              "min-w-0 whitespace-nowrap text-[13px] font-medium tracking-tight transition-[opacity,transform] duration-200",
-              expanded ? "opacity-100 translate-x-0" : "opacity-0 translate-x-1"
+              "pointer-events-none absolute bottom-2 right-2 size-3 text-white/56 transition-transform duration-200",
+              open ? "rotate-0" : "rotate-180"
             )}
-          >
-            Dev Mode
-          </span>
-
-          <span
-            className={cn(
-              "ml-auto flex items-center gap-1 pr-3 text-[12px] text-white/56 transition-[opacity,transform] duration-200",
-              expanded ? "opacity-100 translate-x-0" : "opacity-0 translate-x-1"
-            )}
-          >
-            <span>{appMode === "hosted" ? "Hosted" : "Local"}</span>
-            <ChevronUp
-              className={cn(
-                "size-3.5 transition-transform duration-200",
-                open ? "rotate-0" : "rotate-180"
-              )}
-            />
-          </span>
+          />
         </button>
       </div>
     </div>

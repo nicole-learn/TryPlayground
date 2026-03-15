@@ -1,21 +1,14 @@
 "use client";
 
-import { STUDIO_STATE_SCHEMA_VERSION } from "./studio-local-runtime-data";
-import type { StudioProviderSettings, StudioWorkspaceSnapshot } from "./types";
+import type { StudioProviderSettings } from "./types";
 
 const STORAGE_KEYS = {
-  gridDensity: "tryplayground.studio.gridDensity",
   providerSettings: "tryplayground.studio.providerSettings",
-  localWorkspaceSnapshot: "tryplayground.studio.local.workspaceSnapshot",
 } as const;
 
 const LEGACY_STORAGE_KEYS = {
   providerSettings: "tryplayground.studio.settings",
 } as const;
-
-const UPLOADS_DATABASE_NAME = "tryplayground.studio.uploads";
-const UPLOADS_STORE_NAME = "uploadedAssets";
-const UPLOADS_DATABASE_VERSION = 1;
 
 function getLocalStorage() {
   return typeof window === "undefined" ? null : window.localStorage;
@@ -63,25 +56,6 @@ function removeValue(storage: Storage | null, key: string) {
   }
 }
 
-function sanitizeSnapshot(snapshot: StudioWorkspaceSnapshot): StudioWorkspaceSnapshot {
-  return {
-    ...snapshot,
-    providerSettings: {
-      falApiKey: "",
-      lastValidatedAt: snapshot.providerSettings.lastValidatedAt,
-    },
-  };
-}
-
-export function loadStoredGridDensity() {
-  const value = readJson<number>(getLocalStorage(), STORAGE_KEYS.gridDensity);
-  return typeof value === "number" && value >= 0 && value <= 6 ? value : null;
-}
-
-export function saveStoredGridDensity(value: number) {
-  writeJson(getLocalStorage(), STORAGE_KEYS.gridDensity, value);
-}
-
 function removeLegacyProviderSettings() {
   removeValue(getLocalStorage(), LEGACY_STORAGE_KEYS.providerSettings);
 }
@@ -93,136 +67,65 @@ export function loadStoredProviderSettings(): StudioProviderSettings | null {
     getSessionStorage(),
     STORAGE_KEYS.providerSettings
   );
-  if (!value || typeof value.falApiKey !== "string") {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const falApiKey = typeof value.falApiKey === "string" ? value.falApiKey.trim() : "";
+  const openaiApiKey = typeof value.openaiApiKey === "string" ? value.openaiApiKey.trim() : "";
+  const anthropicApiKey =
+    typeof value.anthropicApiKey === "string" ? value.anthropicApiKey.trim() : "";
+  const geminiApiKey = typeof value.geminiApiKey === "string" ? value.geminiApiKey.trim() : "";
+
+  if (!falApiKey && !openaiApiKey && !anthropicApiKey && !geminiApiKey) {
     return null;
   }
 
   return {
-    falApiKey: value.falApiKey.trim(),
-    lastValidatedAt:
-      typeof value.lastValidatedAt === "string" ? value.lastValidatedAt : null,
+    falApiKey,
+    falLastValidatedAt:
+      typeof value.falLastValidatedAt === "string"
+        ? value.falLastValidatedAt
+        : null,
+    openaiApiKey,
+    openaiLastValidatedAt:
+      typeof value.openaiLastValidatedAt === "string"
+        ? value.openaiLastValidatedAt
+        : null,
+    anthropicApiKey,
+    anthropicLastValidatedAt:
+      typeof value.anthropicLastValidatedAt === "string"
+        ? value.anthropicLastValidatedAt
+        : null,
+    geminiApiKey,
+    geminiLastValidatedAt:
+      typeof value.geminiLastValidatedAt === "string"
+        ? value.geminiLastValidatedAt
+        : null,
   };
 }
 
 export function saveStoredProviderSettings(value: StudioProviderSettings) {
   removeLegacyProviderSettings();
 
-  const falApiKey = value.falApiKey.trim();
-  if (!falApiKey) {
+  const falApiKey = (value.falApiKey ?? "").trim();
+  const openaiApiKey = (value.openaiApiKey ?? "").trim();
+  const anthropicApiKey = (value.anthropicApiKey ?? "").trim();
+  const geminiApiKey = (value.geminiApiKey ?? "").trim();
+
+  if (!falApiKey && !openaiApiKey && !anthropicApiKey && !geminiApiKey) {
     removeValue(getSessionStorage(), STORAGE_KEYS.providerSettings);
     return;
   }
 
   writeJson(getSessionStorage(), STORAGE_KEYS.providerSettings, {
     falApiKey,
-    lastValidatedAt: value.lastValidatedAt,
-  });
-}
-
-export function loadStoredWorkspaceSnapshot() {
-  const snapshot = readJson<StudioWorkspaceSnapshot>(
-    getLocalStorage(),
-    STORAGE_KEYS.localWorkspaceSnapshot
-  );
-
-  if (!snapshot || snapshot.schemaVersion !== STUDIO_STATE_SCHEMA_VERSION) {
-    return null;
-  }
-
-  return snapshot;
-}
-
-export function saveStoredWorkspaceSnapshot(
-  snapshot: StudioWorkspaceSnapshot
-) {
-  writeJson(
-    getLocalStorage(),
-    STORAGE_KEYS.localWorkspaceSnapshot,
-    sanitizeSnapshot(snapshot)
-  );
-}
-
-function openUploadsDatabase(): Promise<IDBDatabase | null> {
-  if (typeof window === "undefined" || typeof window.indexedDB === "undefined") {
-    return Promise.resolve(null);
-  }
-
-  return new Promise((resolve) => {
-    const request = window.indexedDB.open(
-      UPLOADS_DATABASE_NAME,
-      UPLOADS_DATABASE_VERSION
-    );
-
-    request.onupgradeneeded = () => {
-      const database = request.result;
-      if (!database.objectStoreNames.contains(UPLOADS_STORE_NAME)) {
-        database.createObjectStore(UPLOADS_STORE_NAME);
-      }
-    };
-
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => resolve(null);
-  });
-}
-
-export async function saveUploadedAssetFile(storagePath: string, file: File | Blob) {
-  const database = await openUploadsDatabase();
-  if (!database) {
-    return;
-  }
-
-  await new Promise<void>((resolve) => {
-    const transaction = database.transaction(UPLOADS_STORE_NAME, "readwrite");
-    transaction.objectStore(UPLOADS_STORE_NAME).put(file, storagePath);
-    transaction.oncomplete = () => {
-      database.close();
-      resolve();
-    };
-    transaction.onerror = () => {
-      database.close();
-      resolve();
-    };
-  });
-}
-
-export async function loadUploadedAssetFile(storagePath: string) {
-  const database = await openUploadsDatabase();
-  if (!database) {
-    return null;
-  }
-
-  return new Promise<Blob | null>((resolve) => {
-    const transaction = database.transaction(UPLOADS_STORE_NAME, "readonly");
-    const request = transaction.objectStore(UPLOADS_STORE_NAME).get(storagePath);
-
-    request.onsuccess = () => {
-      database.close();
-      resolve(request.result instanceof Blob ? request.result : null);
-    };
-
-    request.onerror = () => {
-      database.close();
-      resolve(null);
-    };
-  });
-}
-
-export async function deleteUploadedAssetFile(storagePath: string) {
-  const database = await openUploadsDatabase();
-  if (!database) {
-    return;
-  }
-
-  await new Promise<void>((resolve) => {
-    const transaction = database.transaction(UPLOADS_STORE_NAME, "readwrite");
-    transaction.objectStore(UPLOADS_STORE_NAME).delete(storagePath);
-    transaction.oncomplete = () => {
-      database.close();
-      resolve();
-    };
-    transaction.onerror = () => {
-      database.close();
-      resolve();
-    };
+    falLastValidatedAt: value.falLastValidatedAt,
+    openaiApiKey,
+    openaiLastValidatedAt: value.openaiLastValidatedAt,
+    anthropicApiKey,
+    anthropicLastValidatedAt: value.anthropicLastValidatedAt,
+    geminiApiKey,
+    geminiLastValidatedAt: value.geminiLastValidatedAt,
   });
 }

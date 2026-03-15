@@ -1,24 +1,21 @@
 "use client";
 
-import { readUploadedAssetMediaMetadata } from "./studio-asset-metadata";
 import { createAudioThumbnailUrl } from "./studio-asset-thumbnails";
 import {
   getLibraryItemDownloadFileName,
   getLibraryItemFallbackMimeType,
   readLibraryItemSourceBlob,
 } from "./studio-library-item-source";
-import { getStudioUploadedMediaKind, studioUploadSupportsAlpha } from "./studio-upload-files";
+import { getStudioUploadedMediaKind } from "./studio-upload-files";
 import type {
   DraftReference,
+  GenerationRun,
   LibraryItem,
   StudioFolder,
   StudioReferenceInputKind,
-  StudioRunFile,
   StudioRunStatus,
 } from "./types";
 import { createStudioId } from "./studio-local-runtime-data";
-
-export const STUDIO_MEDIA_UPLOAD_ACCEPT = "image/*,video/*,audio/*";
 
 function sanitizeFileName(rawValue: string) {
   return rawValue
@@ -28,6 +25,7 @@ function sanitizeFileName(rawValue: string) {
     .replace(/^-+|-+$/g, "");
 }
 
+export const STUDIO_MEDIA_UPLOAD_ACCEPT = "image/*,video/*,audio/*";
 
 export function revokePreviewUrl(url: string | null | undefined) {
   if (url?.startsWith("blob:")) {
@@ -49,12 +47,23 @@ export function releaseUploadedPreview(
 
 export function createFolderItemCounts(
   folders: StudioFolder[],
-  items: Pick<LibraryItem, "folderId">[]
+  items: Pick<LibraryItem, "folderId">[],
+  runs: Pick<GenerationRun, "folderId" | "outputAssetId" | "status">[] = []
 ) {
   return Object.fromEntries(
     folders.map((folder) => [
       folder.id,
-      items.filter((item) => item.folderId === folder.id).length,
+      items.filter((item) => item.folderId === folder.id).length +
+        runs.filter(
+          (run) =>
+            run.folderId === folder.id &&
+            run.outputAssetId === null &&
+            (run.status === "pending" ||
+              run.status === "queued" ||
+              run.status === "processing" ||
+              run.status === "failed" ||
+              run.status === "cancelled")
+        ).length,
     ])
   ) as Record<string, number>;
 }
@@ -289,7 +298,6 @@ export function createTextLibraryItem(params: {
   const trimmedBody = params.body.trim();
   const fallbackTitle = trimmedBody.slice(0, 36) || "Text note";
   const timestamp = new Date().toISOString();
-  const folderIds = params.folderId ? [params.folderId] : [];
   const fileName = `${sanitizeFileName(params.title || fallbackTitle) || "text-note"}.txt`;
 
   return {
@@ -319,7 +327,6 @@ export function createTextLibraryItem(params: {
     aspectRatioLabel: null,
     hasAlpha: false,
     folderId: params.folderId,
-    folderIds,
     storageBucket: "inline-text",
     storagePath: null,
     thumbnailPath: null,
@@ -329,106 +336,6 @@ export function createTextLibraryItem(params: {
     metadata: {},
     errorMessage: null,
   };
-}
-
-export async function createUploadedRunFileAndLibraryItem(params: {
-  file: File;
-  userId: string;
-  workspaceId: string;
-  folderId: string | null;
-}): Promise<{ runFile: StudioRunFile; item: LibraryItem } | null> {
-  const fileType = params.file.type.toLowerCase();
-  const kind = getStudioUploadedMediaKind({
-    fileName: params.file.name,
-    mimeType: fileType,
-  });
-
-  if (!kind) {
-    return null;
-  }
-
-  const previewUrl = URL.createObjectURL(params.file);
-  const mediaMetadata = await readUploadedAssetMediaMetadata({
-    kind,
-    previewUrl,
-    mimeType: params.file.type,
-    hasAlpha: studioUploadSupportsAlpha(params.file.type),
-  });
-  const timestamp = new Date().toISOString();
-  const runFileId = createStudioId("run-file");
-  const storagePath = `uploads/${runFileId}/${sanitizeFileName(params.file.name) || "upload.bin"}`;
-  const folderIds = params.folderId ? [params.folderId] : [];
-
-  const runFile: StudioRunFile = {
-    id: runFileId,
-    runId: null,
-    userId: params.userId,
-    fileRole: "input",
-    sourceType: "uploaded",
-    storageBucket: "browser-upload",
-    storagePath,
-    mimeType: params.file.type || null,
-    fileName: params.file.name,
-    fileSizeBytes: params.file.size,
-    mediaWidth: mediaMetadata.mediaWidth,
-    mediaHeight: mediaMetadata.mediaHeight,
-    mediaDurationSeconds: mediaMetadata.mediaDurationSeconds,
-    aspectRatioLabel: mediaMetadata.aspectRatioLabel,
-    hasAlpha: mediaMetadata.hasAlpha,
-    metadata: {},
-    createdAt: timestamp,
-  };
-  const thumbnailUrl =
-    kind === "audio"
-      ? createAudioThumbnailUrl({
-          title: params.file.name,
-          subtitle: `${(params.file.size / 1024 / 1024).toFixed(1)} MB audio upload`,
-          accentSeed: params.file.name,
-        })
-      : previewUrl;
-
-  const item: LibraryItem = {
-    id: createStudioId("asset"),
-    userId: params.userId,
-    workspaceId: params.workspaceId,
-    runFileId,
-    sourceRunId: null,
-    title: params.file.name,
-    kind,
-    source: "uploaded",
-    role: "uploaded_source",
-    previewUrl,
-    thumbnailUrl,
-    contentText: null,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-    modelId: null,
-    runId: null,
-    provider: "fal",
-    status: "ready",
-    prompt: "",
-    meta:
-      kind === "audio"
-        ? `${params.file.type || "Audio"} • ${(params.file.size / 1024 / 1024).toFixed(1)} MB`
-        : `${params.file.type || "File"} • ${(params.file.size / 1024 / 1024).toFixed(1)} MB`,
-    mediaWidth: mediaMetadata.mediaWidth,
-    mediaHeight: mediaMetadata.mediaHeight,
-    mediaDurationSeconds: mediaMetadata.mediaDurationSeconds,
-    aspectRatioLabel: mediaMetadata.aspectRatioLabel,
-    hasAlpha: mediaMetadata.hasAlpha,
-    folderId: params.folderId,
-    folderIds,
-    storageBucket: "browser-upload",
-    storagePath,
-    thumbnailPath: kind === "audio" ? null : storagePath,
-    fileName: params.file.name,
-    mimeType: params.file.type || null,
-    byteSize: params.file.size,
-    metadata: {},
-    errorMessage: null,
-  };
-
-  return { runFile, item };
 }
 
 export function hasFolderNameConflict(

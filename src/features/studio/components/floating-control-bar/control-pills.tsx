@@ -158,8 +158,8 @@ function PillMenu({
   );
 }
 
-function pillTriggerClassName() {
-  return "flex h-7 w-fit items-center gap-1.5 whitespace-nowrap rounded-md border-0 bg-muted/60 px-2.5 py-1 text-xs font-medium shadow-sm transition-all hover:bg-muted/90 dark:bg-[linear-gradient(to_bottom,rgba(255,255,255,0.10),rgba(255,255,255,0.05))] dark:shadow-[0_1px_2px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.04)] dark:hover:bg-[linear-gradient(to_bottom,rgba(255,255,255,0.16),rgba(255,255,255,0.09))] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
+export function controlPillTriggerClassName() {
+  return "flex h-7 w-fit items-center gap-1.5 whitespace-nowrap rounded-md border-0 bg-muted/60 px-2.5 py-1 text-xs font-medium shadow-sm transition-all hover:bg-muted/90 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-[linear-gradient(to_bottom,rgba(255,255,255,0.10),rgba(255,255,255,0.05))] dark:shadow-[0_1px_2px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.04)] dark:hover:bg-[linear-gradient(to_bottom,rgba(255,255,255,0.16),rgba(255,255,255,0.09))] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
 }
 
 function PillOptionButton({
@@ -199,7 +199,7 @@ export function SettingPillButton({ pill }: { pill: ControlPillConfig }) {
           type="button"
           onClick={() => setOpen((current) => !current)}
           aria-label={pill.label}
-          className={pillTriggerClassName()}
+          className={controlPillTriggerClassName()}
         >
           {pill.icon ? (
             <span className="flex shrink-0 items-center">{pill.icon}</span>
@@ -256,7 +256,7 @@ export function ModelSelectPill({
           type="button"
           onClick={() => setOpen((current) => !current)}
           aria-label="Select model"
-          className={pillTriggerClassName()}
+          className={controlPillTriggerClassName()}
         >
           <ModelKindIcon
             kind={selectedModel.kind}

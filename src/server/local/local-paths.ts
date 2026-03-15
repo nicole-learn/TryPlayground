@@ -71,3 +71,7 @@ export function getLocalItemThumbnailDirectory(itemId: string) {
 export function getLocalRunInputDirectory(runId: string) {
   return path.join(getLocalStorageRoot(), "runs", runId, "inputs");
 }
+
+export function getLocalRunOutputDirectory(runId: string) {
+  return path.join(getLocalStorageRoot(), "runs", runId, "outputs");
+}

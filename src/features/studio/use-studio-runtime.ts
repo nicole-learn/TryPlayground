@@ -1,8 +1,8 @@
 "use client";
 
 import type { StudioAppMode } from "./studio-app-mode";
-import { useStudioMockRuntime } from "./use-studio-mock-runtime";
+import { useStudioRuntimeCore } from "./use-studio-runtime-core";
 
 export function useStudioRuntime(appMode: StudioAppMode) {
-  return useStudioMockRuntime(appMode);
+  return useStudioRuntimeCore(appMode);
 }

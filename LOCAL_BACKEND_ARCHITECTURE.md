@@ -7,7 +7,7 @@ The product goal is:
 - a user downloads or opens TryPlayground on their computer
 - there is no cloud or deployment setup required
 - there is no local database setup required
-- they add a Fal API key and can immediately use the app
+- they add the provider API keys they need and can immediately use the app
 - all local data persists cleanly across refreshes and restarts
 
 This document replaces the current browser-storage mock approach as the long-term local architecture.
@@ -67,20 +67,19 @@ Why:
 
 ### Secret Storage
 
-- preferred: OS keychain
-- fallback for unsupported environments: session-only in-memory secret store
+- current product choice: session-only browser storage mirrored into local server session cookies
 
 Important:
 
-- Fal API keys should not be stored in SQLite.
-- Fal API keys should not be stored in plain JSON on disk.
+- Provider API keys should not be stored in SQLite.
+- Provider API keys should not be stored in plain JSON on disk.
 
 ## What Replaces The Current Browser Storage
 
 The current local mode uses:
 
 - `localStorage` for workspace snapshot
-- `sessionStorage` for Fal key
+- `sessionStorage` for provider keys
 - IndexedDB for uploaded blobs
 
 That is acceptable as a mock. It is not the long-term local backend.
@@ -89,7 +88,7 @@ The real local backend should move to:
 
 - SQLite for structured domain data
 - filesystem for real files
-- OS keychain for secrets
+- session-only secret handling for provider keys
 - small local preferences table for device-specific UI state
 
 The browser should become just a client of the local backend, even when the backend runs in the same app process.
@@ -123,14 +122,15 @@ That means:
 - enabled models remain
 - local preferences remain
 
-### Fal key behavior
+### Provider key behavior
 
-Recommended behavior:
+Current behavior:
 
-- packaged app or supported desktop environment: persist Fal key in OS keychain
-- unsupported environment: session-only fallback, with explicit UI message
+- provider keys stay in the current browser session only
+- the local server reads them from session cookies for route handlers and SSE
+- quitting the session requires the user to paste them again next time
 
-This keeps the default user experience simple without lowering the security bar.
+This keeps the current product simple while avoiding long-term secret persistence.
 
 ## Local Data Directory
 
@@ -218,8 +218,7 @@ src/
         thumbnail-jobs.ts
       secrets/
         local-secret-store.ts
-        keychain-secret-store.ts
-        memory-secret-store.ts
+        session-secret-store.ts
       repositories/
         workspace-repository.ts
         folder-repository.ts
@@ -495,7 +494,7 @@ This is simpler and more reliable than requiring a full waveform extractor on da
 
 1. User submits a generation.
 2. Local mutation validates:
-   - Fal key available
+   - required provider key available
    - model enabled
    - active queue limit not exceeded
 3. A `generation_runs` row is created as `queued`.
@@ -514,16 +513,15 @@ Recommended abstraction:
 
 Implementations:
 
-- `KeychainSecretStore`
-- `MemorySecretStore`
+- `SessionSecretStore`
 
 Behavior:
 
-- packaged app and supported desktop environments use keychain storage
-- unsupported environments can fall back to in-memory session storage
-- the rest of the app never talks to the keychain directly
+- provider keys live only for the current session
+- the local server reads them through the shared session secret store
+- the rest of the app never talks to browser storage directly
 
-This keeps the architecture clean and future-proof.
+This keeps the architecture clean and aligned with the current product rules.
 
 ## Why We Should Not Keep The Current Local Mock Storage As The Real Local Backend
 
@@ -565,7 +563,7 @@ For zero-config local mode, the product should move to:
 
 - SQLite for metadata
 - local filesystem for source files and thumbnails
-- OS keychain for Fal API keys
+- session-only provider API keys
 - SSE + revision-based sync for UI updates
 - shared domain schema with hosted mode
 

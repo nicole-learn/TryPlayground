@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { requireSupabaseUser } from "@/lib/supabase/server";
 import { createHostedCreditCheckoutSession } from "@/server/studio/hosted-billing";
+import { parseHostedCheckoutPayload } from "@/server/studio/studio-request-validation";
+import { toStudioErrorResponse } from "@/server/studio/studio-route-errors";
 
 export const runtime = "nodejs";
 
@@ -11,10 +13,11 @@ export async function POST(request: Request) {
     let payload: {
       successPath?: string;
       cancelPath?: string;
+      checkoutRequestId?: string;
     } = {};
 
     try {
-      payload = (await request.json()) as typeof payload;
+      payload = parseHostedCheckoutPayload(await request.json());
     } catch {
       payload = {};
     }
@@ -25,20 +28,13 @@ export async function POST(request: Request) {
       user,
       successPath: payload.successPath,
       cancelPath: payload.cancelPath,
+      checkoutRequestId: payload.checkoutRequestId,
     });
 
     const response = NextResponse.json(result);
     response.headers.set("Cache-Control", "no-store");
     return response;
   } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Could not create the Stripe Checkout session.",
-      },
-      { status: 400 }
-    );
+    return toStudioErrorResponse(error, "Could not create the Stripe Checkout session.");
   }
 }

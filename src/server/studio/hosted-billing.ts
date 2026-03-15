@@ -5,6 +5,10 @@ import type { SupabaseClient, User } from "@supabase/supabase-js";
 import type { Database, Json } from "@/lib/supabase/database.types";
 import { createSupabaseAdminClient } from "@/lib/supabase/server";
 import {
+  buildHostedStripeCheckoutIdempotencyKey,
+  calculateHostedRefundAdjustment,
+} from "@/server/studio/hosted-billing-logic";
+import {
   getStripeKeyMode,
   getStripeWebhookSecret,
   isStripeCheckoutConfigured,
@@ -240,8 +244,21 @@ async function createPendingCreditPurchase(params: {
   userId: string;
   creditPack: CreditPackRow;
   livemode: boolean;
+  checkoutRequestId?: string;
   metadata?: Record<string, unknown>;
 }) {
+  if (params.checkoutRequestId) {
+    const existing = await findCreditPurchaseByCheckoutRequestId({
+      supabase: params.supabase,
+      userId: params.userId,
+      checkoutRequestId: params.checkoutRequestId,
+    });
+
+    if (existing) {
+      return existing;
+    }
+  }
+
   const { data, error } = await params.supabase
     .from("credit_purchases")
     .insert({
@@ -253,10 +270,23 @@ async function createPendingCreditPurchase(params: {
       currency: params.creditPack.currency,
       status: "pending",
       livemode: params.livemode,
+      checkout_request_id: params.checkoutRequestId ?? null,
       metadata: (params.metadata ?? {}) as Json,
     })
     .select("*")
     .single();
+
+  if (error?.code === "23505" && params.checkoutRequestId) {
+    const existing = await findCreditPurchaseByCheckoutRequestId({
+      supabase: params.supabase,
+      userId: params.userId,
+      checkoutRequestId: params.checkoutRequestId,
+    });
+
+    if (existing) {
+      return existing;
+    }
+  }
 
   if (error || !data) {
     throw new Error(error?.message ?? "Could not create the hosted credit purchase.");
@@ -301,6 +331,25 @@ async function findCreditPurchaseByCheckoutSessionId(params: {
   return data as CreditPurchaseRow | null;
 }
 
+async function findCreditPurchaseByCheckoutRequestId(params: {
+  supabase: HostedSupabaseClient;
+  userId: string;
+  checkoutRequestId: string;
+}) {
+  const { data, error } = await params.supabase
+    .from("credit_purchases")
+    .select("*")
+    .eq("user_id", params.userId)
+    .eq("checkout_request_id", params.checkoutRequestId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as CreditPurchaseRow | null;
+}
+
 async function findCreditPurchaseByPaymentIntentId(params: {
   supabase: HostedSupabaseClient;
   paymentIntentId: string;
@@ -333,6 +382,43 @@ async function findCreditPurchaseByChargeId(params: {
   }
 
   return data as CreditPurchaseRow | null;
+}
+
+export async function deleteHostedBillingCustomersForUser(params: {
+  supabase: HostedSupabaseClient;
+  userId: string;
+}) {
+  const { data, error } = await params.supabase
+    .from("billing_customers")
+    .select("*")
+    .eq("user_id", params.userId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data || data.length === 0 || !isStripeCheckoutConfigured()) {
+    return;
+  }
+
+  const { stripe } = ensureStripeClient();
+
+  for (const customer of data as BillingCustomerRow[]) {
+    try {
+      await stripe.customers.del(customer.stripe_customer_id);
+    } catch (error) {
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === "resource_missing"
+      ) {
+        continue;
+      }
+
+      throw error;
+    }
+  }
 }
 
 export async function applyHostedCreditLedgerEntry(params: {
@@ -592,18 +678,51 @@ async function refundCreditPurchaseFromCharge(params: {
     return purchase;
   }
 
+  const refundAdjustment = calculateHostedRefundAdjustment({
+    purchaseAmountCents: purchase.amount_cents,
+    purchaseCredits: purchase.credits_amount,
+    refundedAmountCents: purchase.refunded_amount_cents,
+    refundedCredits: purchase.refunded_credits,
+    targetRefundAmountCents: params.charge.amount_refunded,
+  });
+
+  if (refundAdjustment.deltaCredits <= 0) {
+    if (
+      purchase.refunded_amount_cents !== refundAdjustment.nextRefundedAmountCents ||
+      purchase.refunded_credits !== refundAdjustment.nextRefundedCredits
+    ) {
+      await updateCreditPurchase({
+        supabase: params.supabase,
+        purchaseId: purchase.id,
+        patch: {
+          refunded_amount_cents: refundAdjustment.nextRefundedAmountCents,
+          refunded_credits: refundAdjustment.nextRefundedCredits,
+          status: refundAdjustment.fullyRefunded ? "refunded" : purchase.status,
+          stripe_charge_id: chargeId,
+          stripe_payment_intent_id: paymentIntentId,
+          stripe_refund_id: latestRefundId,
+          refunded_at: new Date().toISOString(),
+        },
+      });
+    }
+
+    return purchase;
+  }
+
   const refundLedger = await applyHostedCreditLedgerEntry({
     supabase: params.supabase,
     userId: purchase.user_id,
-    deltaCredits: -purchase.credits_amount,
+    deltaCredits: -refundAdjustment.deltaCredits,
     reason: "purchase_refund",
-    idempotencyKey: `stripe:credit_purchase:${purchase.id}:refund:${params.eventId}`,
+    idempotencyKey: `stripe:credit_purchase:${purchase.id}:refund:amount:${refundAdjustment.nextRefundedAmountCents}`,
     sourceEventId: `stripe.event:${params.eventId}`,
     metadata: {
       credit_purchase_id: purchase.id,
       stripe_charge_id: chargeId,
       stripe_payment_intent_id: paymentIntentId,
       stripe_refund_id: latestRefundId,
+      refunded_amount_cents: refundAdjustment.nextRefundedAmountCents,
+      refunded_credits: refundAdjustment.nextRefundedCredits,
     },
     allowNegativeBalance: true,
   });
@@ -612,7 +731,9 @@ async function refundCreditPurchaseFromCharge(params: {
     supabase: params.supabase,
     purchaseId: purchase.id,
     patch: {
-      status: "refunded",
+      status: refundAdjustment.fullyRefunded ? "refunded" : purchase.status,
+      refunded_amount_cents: refundAdjustment.nextRefundedAmountCents,
+      refunded_credits: refundAdjustment.nextRefundedCredits,
       stripe_charge_id: chargeId,
       stripe_payment_intent_id: paymentIntentId,
       stripe_refund_id: latestRefundId,
@@ -621,6 +742,8 @@ async function refundCreditPurchaseFromCharge(params: {
       metadata: {
         ...parseObjectJson(purchase.metadata),
         refunded_by_event: params.eventId,
+        refunded_amount_cents: refundAdjustment.nextRefundedAmountCents,
+        refunded_credits: refundAdjustment.nextRefundedCredits,
       } as Json,
     },
   });
@@ -634,6 +757,7 @@ export async function createHostedCreditCheckoutSession(params: {
   user: User;
   successPath?: string;
   cancelPath?: string;
+  checkoutRequestId?: string;
 }) {
   const { livemode, stripe } = ensureStripeClient();
   const baseUrl = resolveBaseUrl(params.request);
@@ -646,15 +770,47 @@ export async function createHostedCreditCheckoutSession(params: {
     livemode,
   });
 
-  const purchase = await createPendingCreditPurchase({
+  let purchase = await createPendingCreditPurchase({
     supabase: params.supabase,
     userId: params.user.id,
     creditPack,
     livemode,
+    checkoutRequestId: params.checkoutRequestId,
     metadata: {
       source: "hosted_billing.checkout",
     },
   });
+
+  if (purchase.status === "completed" || purchase.status === "refunded") {
+    throw new Error("This hosted checkout request has already been completed.");
+  }
+
+  if (purchase.status !== "pending") {
+    purchase = await updateCreditPurchase({
+      supabase: params.supabase,
+      purchaseId: purchase.id,
+      patch: {
+        status: "pending",
+        stripe_checkout_url: null,
+        metadata: {
+          ...parseObjectJson(purchase.metadata),
+          checkout_restarted_at: new Date().toISOString(),
+        } as Json,
+      },
+    });
+  }
+
+  if (
+    purchase.status === "pending" &&
+    purchase.stripe_checkout_session_id &&
+    purchase.stripe_checkout_url
+  ) {
+    return {
+      checkoutUrl: purchase.stripe_checkout_url,
+      purchaseId: purchase.id,
+      checkoutSessionId: purchase.stripe_checkout_session_id,
+    };
+  }
 
   try {
     const session = await stripe.checkout.sessions.create({
@@ -677,12 +833,16 @@ export async function createHostedCreditCheckoutSession(params: {
         tryplayground_credit_purchase_id: purchase.id,
         tryplayground_user_id: params.user.id,
       },
+    }, {
+      idempotencyKey: buildHostedStripeCheckoutIdempotencyKey(purchase.id),
     });
 
     await updateCreditPurchase({
       supabase: params.supabase,
       purchaseId: purchase.id,
       patch: {
+        checkout_request_id: params.checkoutRequestId ?? purchase.checkout_request_id,
+        stripe_checkout_url: session.url,
         stripe_checkout_session_id: session.id,
         stripe_customer_id: stripeCustomerId,
         metadata: {

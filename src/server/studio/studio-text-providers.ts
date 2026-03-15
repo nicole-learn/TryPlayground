@@ -1,0 +1,300 @@
+import { getStudioModelById } from "@/features/studio/studio-model-catalog";
+import type {
+  StudioModelDefinition,
+  StudioProviderKeyId,
+  StudioProviderSettings,
+} from "@/features/studio/types";
+import { getTextProviderServerEnv } from "@/lib/supabase/env";
+
+function getTextModel(modelId: string) {
+  const model = getStudioModelById(modelId);
+  if (model.kind !== "text" || !model.apiModelId) {
+    throw new Error("This model is not configured as a direct text provider.");
+  }
+
+  return model;
+}
+
+function getLocalProviderKeyForModel(params: {
+  modelId: string;
+  providerSettings: Pick<
+    StudioProviderSettings,
+    "openaiApiKey" | "anthropicApiKey" | "geminiApiKey"
+  >;
+}) {
+  const model = getTextModel(params.modelId);
+
+  switch (model.provider) {
+    case "openai":
+      return params.providerSettings.openaiApiKey.trim();
+    case "anthropic":
+      return params.providerSettings.anthropicApiKey.trim();
+    case "google":
+      return params.providerSettings.geminiApiKey.trim();
+    default:
+      return "";
+  }
+}
+
+function getHostedProviderKeyForModel(modelId: string) {
+  const model = getTextModel(modelId);
+  const env = getTextProviderServerEnv();
+
+  switch (model.provider) {
+    case "openai":
+      return env.openaiApiKey;
+    case "anthropic":
+      return env.anthropicApiKey;
+    case "google":
+      return env.geminiApiKey;
+    default:
+      return "";
+  }
+}
+
+async function parseErrorMessage(response: Response) {
+  try {
+    const payload = (await response.json()) as {
+      error?: { message?: string };
+      message?: string;
+      errorMessage?: string;
+    };
+    return (
+      payload.error?.message?.trim() ||
+      payload.message?.trim() ||
+      payload.errorMessage?.trim() ||
+      `Provider request failed with ${response.status}.`
+    );
+  } catch {
+    return `Provider request failed with ${response.status}.`;
+  }
+}
+
+async function generateOpenAiText(params: {
+  model: StudioModelDefinition;
+  apiKey: string;
+  prompt: string;
+}) {
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${params.apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: params.model.apiModelId,
+      input: params.prompt,
+      max_output_tokens: params.model.maxOutputTokens,
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+
+  const payload = (await response.json()) as {
+    output_text?: string;
+    usage?: Record<string, unknown>;
+  } & Record<string, unknown>;
+
+  return {
+    payload: {
+      ...payload,
+      output: payload.output_text ?? "",
+    },
+    usageSnapshot: payload.usage ?? {},
+  };
+}
+
+async function generateAnthropicText(params: {
+  model: StudioModelDefinition;
+  apiKey: string;
+  prompt: string;
+}) {
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "anthropic-version": "2023-06-01",
+      "Content-Type": "application/json",
+      "x-api-key": params.apiKey,
+    },
+    body: JSON.stringify({
+      model: params.model.apiModelId,
+      max_tokens: params.model.maxOutputTokens,
+      messages: [
+        {
+          role: "user",
+          content: params.prompt,
+        },
+      ],
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+
+  const payload = (await response.json()) as {
+    content?: Array<{ type?: string; text?: string }>;
+    usage?: Record<string, unknown>;
+  } & Record<string, unknown>;
+  const output = (payload.content ?? [])
+    .filter((block) => block.type === "text" && typeof block.text === "string")
+    .map((block) => block.text?.trim() ?? "")
+    .filter((text) => text.length > 0)
+    .join("\n\n");
+
+  return {
+    payload: {
+      ...payload,
+      output,
+    },
+    usageSnapshot: payload.usage ?? {},
+  };
+}
+
+async function generateGeminiText(params: {
+  model: StudioModelDefinition;
+  apiKey: string;
+  prompt: string;
+}) {
+  const url = new URL(
+    `https://generativelanguage.googleapis.com/v1beta/models/${params.model.apiModelId}:generateContent`
+  );
+  url.searchParams.set("key", params.apiKey);
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      contents: [
+        {
+          parts: [{ text: params.prompt }],
+        },
+      ],
+      generationConfig: {
+        maxOutputTokens: params.model.maxOutputTokens,
+      },
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+
+  const payload = (await response.json()) as {
+    candidates?: Array<{
+      content?: {
+        parts?: Array<{ text?: string }>;
+      };
+    }>;
+    usageMetadata?: Record<string, unknown>;
+  } & Record<string, unknown>;
+  const output =
+    payload.candidates?.[0]?.content?.parts
+      ?.map((part) => part.text?.trim() ?? "")
+      .filter((text) => text.length > 0)
+      .join("\n\n") ?? "";
+
+  return {
+    payload: {
+      ...payload,
+      output,
+    },
+    usageSnapshot: payload.usageMetadata ?? {},
+  };
+}
+
+export async function generateStudioTextProviderPayload(params: {
+  modelId: string;
+  prompt: string;
+  providerApiKey: string;
+}) {
+  const model = getTextModel(params.modelId);
+
+  switch (model.provider) {
+    case "openai":
+      return generateOpenAiText({
+        model,
+        apiKey: params.providerApiKey,
+        prompt: params.prompt,
+      });
+    case "anthropic":
+      return generateAnthropicText({
+        model,
+        apiKey: params.providerApiKey,
+        prompt: params.prompt,
+      });
+    case "google":
+      return generateGeminiText({
+        model,
+        apiKey: params.providerApiKey,
+        prompt: params.prompt,
+      });
+    default:
+      throw new Error("This text model is not configured for a direct provider.");
+  }
+}
+
+export function getRequiredProviderKeyForModel(params: {
+  modelId: string;
+  providerSettings: Pick<
+    StudioProviderSettings,
+    "falApiKey" | "openaiApiKey" | "anthropicApiKey" | "geminiApiKey"
+  >;
+}) {
+  const model = getStudioModelById(params.modelId);
+
+  switch (model.provider) {
+    case "fal":
+      return params.providerSettings.falApiKey.trim() ? null : ("fal" as const);
+    case "openai":
+      return params.providerSettings.openaiApiKey.trim()
+        ? null
+        : ("openai" as const);
+    case "anthropic":
+      return params.providerSettings.anthropicApiKey.trim()
+        ? null
+        : ("anthropic" as const);
+    case "google":
+      return params.providerSettings.geminiApiKey.trim()
+        ? null
+        : ("gemini" as const);
+    default:
+      return null;
+  }
+}
+
+export function getLocalTextProviderKey(params: {
+  modelId: string;
+  providerSettings: Pick<
+    StudioProviderSettings,
+    "openaiApiKey" | "anthropicApiKey" | "geminiApiKey"
+  >;
+}) {
+  return getLocalProviderKeyForModel(params);
+}
+
+export function getHostedTextProviderKey(modelId: string) {
+  return getHostedProviderKeyForModel(modelId);
+}
+
+export function getProviderKeyLabel(provider: StudioProviderKeyId) {
+  switch (provider) {
+    case "fal":
+      return "Fal API key";
+    case "openai":
+      return "OpenAI API key";
+    case "anthropic":
+      return "Claude API key";
+    case "gemini":
+      return "Gemini API key";
+    default:
+      return "API key";
+  }
+}
